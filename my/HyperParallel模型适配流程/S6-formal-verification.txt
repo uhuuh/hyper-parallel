@@ -1,0 +1,87 @@
+S6 形式验证，可选
+================
+
+阶段表直接要求
+
+- 使用 formal-verification†。
+- 持久化产物为规格和反例审查结果。
+- 退出条件为没有未解决反例。
+- 本阶段在主阶段表中标为 optional。
+
+fun S6_形式验证(任务, S5结果) {
+    验证结果 = SKILL(
+        "formal-verification",
+        {
+            仓库: 任务.仓库路径,
+            源码版本: S5结果.待验收版本,
+            验证范围: 任务.形式验证范围,
+            已有证据: S5结果
+        }
+    )
+
+    if 验证结果.引擎或模型认证不可用 {
+        return {
+            状态: "BLOCKED",
+            计划: 验证结果.计划,
+            原因: 验证结果.实际配置失败原因
+        }
+    }
+
+    产物检查 = 检查规格原始报告及各候选验证产物(验证结果)
+    if !产物检查.完整 {
+        return { 状态: "BLOCKED", 验证结果, 缺失项: 产物检查.缺失项 }
+    }
+
+    反例审查 = 审查已确认失败及待处理的所有候选(验证结果)
+    未解决反例 = 汇总未解决反例(反例审查)
+
+    return {
+        状态: if 未解决反例.为空 "PASS" else "BLOCKED",
+        规格: 验证结果.规格,
+        原始报告: 验证结果.原始报告,
+        反例审查,
+        探针结果: 验证结果.探针结果,
+        未解决反例
+    }
+}
+
+关联 Skill 内部流程
+
+1. 读取 .agent/skills/formal-verification/profiles.json，选择窄范围 profile。
+2. 读取 references/training-invariants.md 和 references/hyperparallel.md。
+   真实契约仍需核对当前实现、调用方、测试及仓库规则。
+3. 用 verify.py plan 检查离线计划。
+4. 按 references/engine-setup.md 准备官方 FM-Agent 和模型后端，运行 doctor 检查依赖与选项。
+5. 用 verify.py run --mode verify 执行，适配器加入 --isolate --all-bugs 和领域知识。
+6. 阅读原始报告及每个候选的结果、失败和待处理记录。
+7. 对已确认框架缺陷，要求针对真实实现执行的探针证据，记录触发条件及复现命令。
+   修复缺陷时将已确认探针转为相应回归测试，再按修改后的源码版本验证。
+
+实际脚本命令
+
+python .agent/skills/formal-verification/scripts/verify.py plan --profile <profile>
+python .agent/skills/formal-verification/scripts/verify.py doctor --profile <profile> --engine-root <engine-root>
+python .agent/skills/formal-verification/scripts/verify.py run --profile <profile> --engine-root <engine-root> --mode verify
+
+- --repo 指定框架仓库，--submodule 可覆盖 profile 中的源码范围。
+- --engine-python 指定引擎解释器，探针环境需按 Skill 要求可编辑安装被测框架。
+- run --mode estimate 调用官方估算，run --mode spec 用于仅生成规格。
+- plan 和 run --dry-run 用于检查计划。
+- --resume 恢复时保持范围与模式一致，代码变更后可用 --incremental <intent-file>。
+
+对应文件与产物
+
+- .agent/skills/formal-verification/SKILL.md 是本阶段关联 Skill 的入口。
+- .agent/skills/formal-verification/scripts/verify.py 是实际 CLI 适配器。
+- .agent/skills/formal-verification/profiles.json 保存 profile 配置。
+- .agent/skills/formal-verification/references/training-invariants.md 提供训练不变量问题。
+- .agent/skills/formal-verification/references/hyperparallel.md 提供 HyperParallel 领域知识。
+- .agent/skills/formal-verification/references/engine-setup.md 说明引擎和模型后端配置。
+- .agent/skills/formal-verification/references/bug-validator.md 说明候选缺陷验证要求。
+- 原始输出包括 fm_agent/report.html、logic_verification_results/、bug_validation/summary.json 及各候选探针文件。
+- 每项发现记录源码和函数、契约来源、触发条件、预期与实际行为、复现命令和输出、版本及限制。
+- 退出码零或报告中的 MATCH 需要结合实际产物和探针审查，才能判定阶段是否完成。
+- LLM 推理结果作为调查证据记录，结论需明确实际验证范围。
+- 若 formal-verification† 在 checkout 中缺失，按主 Skill 的 † 约定记录并跳过可选 S6。
+
+

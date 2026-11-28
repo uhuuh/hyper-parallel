@@ -1,38 +1,39 @@
 ---
 name: strategy-validator
 description: >
-  Validate and optimize parallel training strategies through iterative benchmark runs.
-  Generates candidate configurations, executes distributed training, extracts metrics,
-  and identifies optimal parallelism settings. Can work standalone or with PSA.
+  通过迭代基准测试验证和优化并行训练策略。生成候选配置、执行分布式训练、提取指标，
+  并确定最优并行设置。既可独立使用，也可与 PSA 配合。
 ---
 
-# Strategy Validator
+<a id="strategy-validator"></a>
+# Strategy Validator：并行策略验证
 
-**Iterative strategy optimization through empirical validation.**
-Automatically generates and tests multiple parallelism candidates, identifies bottlenecks,
-and converges to optimal configuration.
+**通过实测验证迭代优化策略。** 自动生成并测试多个并行候选，识别瓶颈，并逐步收敛到最优配置。
 
-## When to use
+<a id="when-to-use"></a>
+## 使用时机
 
-- **After baseline training** to find optimal parallelism strategy
-- After `/parallel-strategy-analyzer` to validate recommendations (optional)
-- To optimize existing configurations (e.g., remove unnecessary dimensions)
-- To explore parallelism space for new model/hardware combinations
-- **MoE-specific**: Validate MoE strategies with expert load and All-to-All metrics
+- **基线训练完成后**，寻找最优并行策略
+- 在 `/parallel-strategy-analyzer` 之后验证推荐方案（可选）
+- 优化现有配置，例如移除不必要的并行维度
+- 为新的模型与硬件组合探索并行策略空间
+- **MoE 专用：** 使用专家负载和 All-to-All 指标验证 MoE 策略
 
-**Prerequisites:**
-- Baseline training run completed (for comparison) or target throughput known
-- Target hardware available (NPU/GPU cluster, e.g., 8× Ascend 910B)
-- Model checkpoint accessible (e.g., `/path/to/Qwen3-30B-A3B`)
-- 5-10 minutes per validation run (50 training steps)
-- Patience for iterative exploration (typically 3-5 candidates)
-- **For MoE models**: Load [references/moe-metrics.md](references/moe-metrics.md) for additional metrics
+**前置条件：**
+- 已完成基线训练用于比较，或已知目标吞吐
+- 目标硬件可用，例如 8× Ascend 910B 的 NPU/GPU 集群
+- 模型检查点可访问，例如 `/path/to/Qwen3-30B-A3B`
+- 每次验证运行需 5～10 分钟（50 个训练步）
+- 预留迭代探索时间，通常测试 3～5 个候选
+- **MoE 模型：** 加载 [references/moe-metrics.md](references/moe-metrics.md) 获取额外指标
 
-## Pre-flight Safety Checks
+<a id="pre-flight-safety-checks"></a>
+## 运行前安全检查
 
-**Before running validation, the following checks are performed automatically:**
+**执行验证前，自动进行以下检查：**
 
-### 1. Device Availability
+<a id="1-device-availability"></a>
+### 1. 设备可用性
 ```bash
 # NPU check
 npu-smi info
@@ -41,19 +42,21 @@ npu-smi info
 nvidia-smi --query-gpu=index,name,memory.free --format=csv
 ```
 
-**Validation**: Must have required number of devices (e.g., 8 for world_size=8)
-**Failure action**: Abort with error message
+**检查要求：** 必须具备所需设备数量，例如 world_size=8 时需要 8 个设备。
+**失败处理：** 输出错误并中止。
 
-### 2. Resource Isolation
+<a id="2-resource-isolation"></a>
+### 2. 资源隔离
 ```bash
 # Check for conflicting training jobs
 pgrep -f torch.distributed
 ```
 
-**Validation**: Warn if other distributed jobs detected
-**Failure action**: Warning only, user can proceed
+**检查要求：** 检测到其他分布式作业时发出警告。
+**失败处理：** 仅警告，用户可以继续。
 
-### 3. Runtime Estimation
+<a id="3-runtime-estimation"></a>
+### 3. 运行时间估算
 ```python
 # Estimated time = warmup (10 steps × 1.5 × avg_step_time)
 #                  + training (40 steps × avg_step_time)
@@ -61,12 +64,13 @@ pgrep -f torch.distributed
 # Typical: 50 steps × 0.7s = ~5-7 minutes
 ```
 
-**Display**: Show estimated completion time
-**User action**: Confirm if first run or --confirm flag
+**显示内容：** 预计完成时间。
+**用户操作：** 首次运行或带 --confirm 标志时确认。
 
-### 4. User Confirmation (First Run)
+<a id="4-user-confirmation-first-run"></a>
+### 4. 用户确认（首次运行）
 
-On first validation run in a session, user is prompted:
+会话中第一次执行验证时，向用户显示：
 ```
 VALIDATION SAFETY CHECK
 ======================================================================
@@ -83,12 +87,13 @@ Estimated runtime:
 Proceed with validation? (yes/no):
 ```
 
-**Bypass**: Use `--auto-approve` flag for automated workflows
-**Force**: Use `--confirm` flag to always prompt
+**跳过确认：** 自动化流程使用 `--auto-approve`。
+**强制确认：** 使用 `--confirm`，每次都询问。
 
-### 5. Output Format
+<a id="5-output-format"></a>
+### 5. 输出格式
 
-Validation outputs **standardized JSON metrics** to stdout for parsing:
+验证将**标准化 JSON 指标**输出到 stdout，供后续解析：
 ```json
 {
   "step": 50,
@@ -100,13 +105,15 @@ Validation outputs **standardized JSON metrics** to stdout for parsing:
 }
 ```
 
-**Tools available**:
-- `tests/benchmarks/strategy_validation/safety_checks.py` - Pre-flight checks
-- `tests/benchmarks/strategy_validation/metrics_output.py` - Standardized output
+**可用工具：**
+- `tests/benchmarks/strategy_validation/safety_checks.py`：运行前检查
+- `tests/benchmarks/strategy_validation/metrics_output.py`：标准化输出
 
-## Validation flow (iterative, load workflow before each phase)
+<a id="validation-flow-iterative-load-workflow-before-each-phase"></a>
+## 验证流程（迭代执行，每个阶段前加载对应工作流）
 
-### Mode 1: Iterative Optimization (Recommended)
+<a id="mode-1-iterative-optimization-recommended"></a>
+### 模式 1：迭代优化（推荐）
 
 ```text
 Phase 1: Baseline Analysis
@@ -136,7 +143,8 @@ Phase 4: Comparison & Iteration
   → workflows/04-comparison-iteration.md
 ```
 
-### Mode 2: Single Strategy Validation (Legacy)
+<a id="mode-2-single-strategy-validation-legacy"></a>
+### 模式 2：单策略验证（旧版）
 
 ```text
 For validating a single PSA recommendation or manual config:
@@ -146,19 +154,22 @@ For validating a single PSA recommendation or manual config:
   4. PSA comparison      → workflows/04-comparison-report.md
 ```
 
-**Iterative cycle:** Baseline → Generate candidates → Validate all → Pick best → Deploy (or iterate)
+**迭代循环：** 基线 → 生成候选 → 验证全部候选 → 选择最佳 → 部署或继续迭代。
 
-## References (on demand)
+<a id="references-on-demand"></a>
+## 参考资料（按需加载）
 
-- [references/config-templates.md](references/config-templates.md) — Training config templates
-- [references/benchmark-recipes.md](references/benchmark-recipes.md) — Standard workloads
-- [references/metrics-schema.md](references/metrics-schema.md) — Metric definitions & extraction
+- [references/config-templates.md](references/config-templates.md)：训练配置模板
+- [references/benchmark-recipes.md](references/benchmark-recipes.md)：标准工作负载
+- [references/metrics-schema.md](references/metrics-schema.md)：指标定义与提取
 
-## Output format
+<a id="output-format"></a>
+## 输出格式
 
-### Iterative Optimization Report
+<a id="iterative-optimization-report"></a>
+### 迭代优化报告
 
-**Final Summary:**
+**最终摘要：**
 
 ```
 Model: Qwen3-30B-A3B (4 layers)
@@ -198,7 +209,8 @@ Deployment Config:
     edp_shard_size: 4
 ```
 
-### Single Strategy Validation (Legacy)
+<a id="single-strategy-validation-legacy"></a>
+### 单策略验证（旧版）
 
 ```
 Strategy: TP=8, CP=1, EP=2, DP=4
@@ -216,56 +228,62 @@ Hardware: 64× Ascend 910B
 Status: ✓ PASS (within ±20% tolerance)
 ```
 
-## Key Heuristics (learned from validation experiments)
+<a id="key-heuristics-learned-from-validation-experiments"></a>
+## 关键启发式规则（来自验证实验）
 
-### Model Size Rules
+<a id="model-size-rules"></a>
+### 模型规模规则
 
-- **≤10 layers**: TP=1 (communication > computation benefit)
-- **10-30 layers**: TP=2
-- **30-60 layers**: TP=4
-- **>60 layers**: TP=8 or consider PP
+- **≤10 层：** TP=1，通信成本大于计算收益
+- **10～30 层：** TP=2
+- **30～60 层：** TP=4
+- **>60 层：** TP=8，或考虑 PP
 
-### Sequence Length Rules
+<a id="sequence-length-rules"></a>
+### 序列长度规则
 
-- **seq_len < 512**: CP=1 (communication dominates)
-- **512 ≤ seq_len < 2048**: CP=2 (marginal benefit)
-- **2048 ≤ seq_len < 4096**: CP=4
-- **seq_len ≥ 4096**: CP=8 (amortizes communication)
+- **seq_len < 512：** CP=1，通信占主导
+- **512 ≤ seq_len < 2048：** CP=2，收益有限
+- **2048 ≤ seq_len < 4096：** CP=4
+- **seq_len ≥ 4096：** CP=8，以摊薄通信成本
 
-### MoE Constraints
+<a id="moe-constraints"></a>
+### MoE 约束
 
-- **Always EP ≥ 2** (framework requirement for fused weights)
-- EP degree should divide total experts evenly
-- Avoid DP=1 (triggers FSDP conflicts in current framework)
+- **始终保持 EP ≥ 2**，这是框架对融合权重的要求
+- EP 并行度应整除专家总数
+- 避免 DP=1，它会触发当前框架中的 FSDP 冲突
 
-### Failure Patterns
+<a id="failure-patterns"></a>
+### 失败模式
 
-- **FSDP + no_grad conflict**: Keep DP ≥ 2
-- **MoE weight incompatibility**: Keep EP > 1
-- **OOM**: Reduce TP/PP, increase DP (enable FSDP sharding)
+- **FSDP 与 no_grad 冲突：** 保持 DP ≥ 2
+- **MoE 权重不兼容：** 保持 EP > 1
+- **OOM：** 减小 TP/PP，增大 DP，以启用 FSDP 分片
 
-## Limitations & Safety
+<a id="limitations--safety"></a>
+## 限制与安全要求
 
-- **Resource isolation:** Each run occupies full device set for 5-10 min
-- **Cost:** 50 training steps × number of candidates (typically 3-5)
-- **Accuracy:** Micro-benchmark may miss long-term issues (memory fragmentation, rare edge cases)
-- **Hardware variance:** ±5-10% throughput variation is normal
-- **Iteration limit:** Stop after 5 failed candidates (avoid infinite loops)
+- **资源隔离：** 每次运行占用全部选定设备 5～10 分钟
+- **成本：** 50 个训练步 × 候选数，通常为 3～5 个候选
+- **准确性：** 微基准可能遗漏显存碎片、罕见边界情况等长期问题
+- **硬件波动：** 吞吐出现 ±5～10% 的变化属于正常情况
+- **迭代上限：** 5 个候选失败后停止，避免无限循环
 
-**Pre-flight checks:**
-- Device availability (via `nvidia-smi` / `npu-smi info`)
-- Model checkpoint exists and is readable
-- Sufficient disk space for logs (~100 MB per run)
-- No conflicting jobs on target devices
+**运行前检查：**
+- 通过 `nvidia-smi` / `npu-smi info` 确认设备可用
+- 模型检查点存在且可读
+- 日志磁盘空间充足，每次运行约需 100 MB
+- 目标设备上没有冲突作业
 
-**Abort conditions:**
-- OOM within first 20 steps → immediate rejection, try reduced parallelism
-- Hang (no progress for >60s) → timeout, report communication issue
-- Loss NaN/Inf → gradient instability, check config validity
-- FSDP errors → adjust DP constraints
+**中止条件：**
+- 前 20 步内 OOM：立即拒绝，尝试降低并行度
+- 挂起，超过 60 秒无进展：超时并报告通信问题
+- Loss 为 NaN/Inf：存在梯度不稳定，检查配置有效性
+- FSDP 错误：调整 DP 约束
 
-**Success criteria:**
-- Throughput improvement ≥ target (default 1.2x)
-- Memory within device limits
-- No runtime errors for 50 continuous steps
-- Stable throughput (std < 10% of mean)
+**成功标准：**
+- 吞吐提升达到目标，默认为 1.2 倍
+- 显存不超过设备限制
+- 连续 50 步没有运行时错误
+- 吞吐稳定，标准差小于均值的 10%

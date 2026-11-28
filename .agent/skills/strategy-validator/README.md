@@ -1,51 +1,59 @@
-# Strategy Validator - Usage Guide
+<a id="strategy-validator---usage-guide"></a>
+# Strategy Validator 使用指南
 
-## Overview
+<a id="overview"></a>
+## 概述
 
-The **strategy-validator** skill optimizes parallel training strategies through iterative empirical validation. It automatically generates candidate configurations, runs benchmarks, and identifies the optimal parallelism strategy.
+**strategy-validator** Skill 通过迭代实测验证优化并行训练策略。它自动生成候选配置、运行基准测试，并确定最优并行策略。
 
-## Quick Start
+<a id="quick-start"></a>
+## 快速开始
 
-### Invocation
+<a id="invocation"></a>
+### 调用方式
 ```
 /validate-strategy
 ```
 
-The skill will guide you through:
-1. Baseline analysis (extract current performance)
-2. Candidate generation (3-5 optimized strategies)
-3. Batch validation (run all candidates)
-4. Comparison & selection (identify winner)
+Skill 将引导你完成：
+1. 基线分析，提取当前性能
+2. 候选生成，产生 3～5 个优化策略
+3. 批量验证，运行全部候选
+4. 比较与选择，确定胜出方案
 
-## When to Use
+<a id="when-to-use"></a>
+## 使用时机
 
-- ✅ After initial training to optimize parallelism strategy
-- ✅ When throughput is below expectations
-- ✅ Before scaling to larger hardware (validate config first)
-- ✅ When model/hardware changes (new baseline needed)
+- ✅ 初始训练完成后，优化并行策略
+- ✅ 吞吐低于预期时
+- ✅ 扩展到更大规模硬件之前，先验证配置
+- ✅ 模型或硬件变化时，需要建立新基线
 
-## Prerequisites
+<a id="prerequisites"></a>
+## 前置条件
 
-1. **Baseline training completed**
-   - At least 50 steps of training logs
-   - Config file accessible
+1. **已完成基线训练**
+   - 至少 50 步的训练日志
+   - 配置文件可访问
 
-2. **Hardware available**
-   - Target cluster ready (e.g., 8× NPUs)
-   - No conflicting jobs
+2. **硬件可用**
+   - 目标集群就绪，例如 8× NPU
+   - 没有冲突作业
 
-3. **Time budget**
-   - ~7 minutes per candidate
-   - Typical: 3-5 candidates = 20-35 minutes total
+3. **时间预算**
+   - 每个候选约 7 分钟
+   - 通常 3～5 个候选，总计 20～35 分钟
 
-4. **Disk space**
-   - ~100 MB per validation run
+4. **磁盘空间**
+   - 每次验证运行约需 100 MB
 
-## Workflow Modes
+<a id="workflow-modes"></a>
+## 工作流模式
 
-### Mode 1: Iterative Optimization (Recommended)
+<a id="mode-1-iterative-optimization-recommended"></a>
+### 模式 1：迭代优化（推荐）
 
-**Use when**: You want to find the absolute best configuration
+**适用场景：** 希望找到最优配置。
 
 ```
 Phase 1: Baseline Analysis
@@ -61,11 +69,12 @@ Phase 4: Comparison & Iteration
   ↓ Identify winner, decide: deploy or iterate
 ```
 
-**Output**: Optimal config + deployment guide
+**输出：** 最优配置和部署指南。
 
-### Mode 2: Single Strategy Validation (Legacy)
+<a id="mode-2-single-strategy-validation-legacy"></a>
+### 模式 2：单策略验证（旧版）
 
-**Use when**: You have a specific config to validate (e.g., from PSA)
+**适用场景：** 已有明确配置需要验证，例如 PSA 的推荐结果。
 
 ```
 Phase 1: Config Generation
@@ -81,36 +90,43 @@ Phase 4: PSA Comparison
   ↓ Compare actual vs estimated
 ```
 
-**Output**: Pass/Fail + metrics delta
+**输出：** 通过/失败判定及指标差异。
 
-## Key Heuristics
+<a id="key-heuristics"></a>
+## 关键启发式规则
 
-The validator uses these rules (learned from experiments):
+验证器使用以下从实验中总结的规则：
 
-### Model Size
-- **≤10 layers**: TP=1 (communication > benefit)
-- **10-30 layers**: TP=2
-- **30-60 layers**: TP=4
-- **>60 layers**: TP=8+
+<a id="model-size"></a>
+### 模型规模
+- **≤10 层：** TP=1，通信成本超过收益
+- **10～30 层：** TP=2
+- **30～60 层：** TP=4
+- **>60 层：** TP=8 或更高
 
-### Sequence Length
-- **< 512**: CP=1 (communication dominates)
-- **512-2048**: CP=2
-- **2048-4096**: CP=4
-- **≥ 4096**: CP=8
+<a id="sequence-length"></a>
+### 序列长度
+- **< 512：** CP=1，通信占主导
+- **512～2048：** CP=2
+- **2048～4096：** CP=4
+- **≥ 4096：** CP=8
 
-### MoE Models
-- **Always EP ≥ 2** (framework requirement)
-- Avoid DP=1 (triggers FSDP conflicts)
+<a id="moe-models"></a>
+### MoE 模型
+- **始终保持 EP ≥ 2**，这是框架要求
+- 避免 DP=1，以免触发 FSDP 冲突
 
-### Bottleneck Patterns
-- **Communication-bound** → Reduce TP/CP, increase DP
-- **Computation-bound** → May already be optimal
-- **Memory-bound** → Increase DP (more sharding)
+<a id="bottleneck-patterns"></a>
+### 瓶颈模式
+- **通信受限** → 减小 TP/CP，增大 DP
+- **计算受限** → 可能已经最优
+- **显存受限** → 增大 DP，增加分片
 
-## Example Session
+<a id="example-session"></a>
+## 示例会话
 
-### Input
+<a id="input"></a>
+### 输入
 ```
 Baseline: TP=2, CP=2, EP=2, DP=2
 Model: Qwen3-30B-A3B (4 layers)
@@ -119,7 +135,8 @@ Throughput: 1081 tokens/s
 Goal: 1.2x improvement
 ```
 
-### Generated Candidates
+<a id="generated-candidates"></a>
+### 生成的候选
 ```
 1. TP=2, CP=1, EP=2, DP=2 — Remove CP
 2. TP=2, CP=1, EP=4, DP=1 — Increase EP
@@ -127,7 +144,8 @@ Goal: 1.2x improvement
 4. TP=1, CP=1, EP=2, DP=4 — Minimal TP
 ```
 
-### Results
+<a id="results"></a>
+### 结果
 ```
 | # | Strategy | Throughput | vs Base | Status |
 |---|----------|------------|---------|--------|
@@ -137,7 +155,8 @@ Goal: 1.2x improvement
 | 4 | Minimal TP | 4274 t/s | 3.95x | ✓ BEST |
 ```
 
-### Output
+<a id="output"></a>
+### 输出
 ```
 🏆 Winner: TP=1, CP=1, EP=2, DP=4
   Throughput: 4274 tokens/s (+295%)
@@ -148,42 +167,46 @@ Goal: 1.2x improvement
 Status: APPROVED FOR DEPLOYMENT
 ```
 
-## Failure Handling
+<a id="failure-handling"></a>
+## 失败处理
 
-### Common Issues
+<a id="common-issues"></a>
+### 常见问题
 
-**1. All candidates fail with FSDP errors**
+**1. 全部候选因 FSDP 错误失败**
 ```
 → All used DP=1 (framework constraint)
 → Regenerate with DP ≥ 2 constraint
 → Auto-retry once
 ```
 
-**2. All candidates worse than baseline**
+**2. 全部候选均差于基线**
 ```
 → Baseline already optimal
 → Document findings
 → No deployment change
 ```
 
-**3. OOM on all candidates**
+**3. 全部候选均发生 OOM**
 ```
 → Model too large for hardware
 → Suggest: reduce batch size, increase devices, enable gradient checkpointing
 ```
 
-**4. Hang/timeout**
+**4. 挂起或超时**
 ```
 → Communication deadlock
 → Check HCCL/NCCL config
 → Reduce parallelism dimensions
 ```
 
-## Output Artifacts
+<a id="output-artifacts"></a>
+## 输出产物
 
-After successful validation:
+验证成功后生成：
 
-### 1. Production Config
+<a id="1-production-config"></a>
+### 1. 生产配置
 ```yaml
 # validation_experiment/production_config.yaml
 accelerator:
@@ -197,7 +220,8 @@ fsdp_config:
   edp_shard_size: 4
 ```
 
-### 2. Final Report
+<a id="2-final-report"></a>
+### 2. 最终报告
 ```markdown
 # validation_experiment/FINAL_REPORT.md
 
@@ -207,7 +231,8 @@ fsdp_config:
 - Deployment recommendation
 ```
 
-### 3. Deployment Guide
+<a id="3-deployment-guide"></a>
+### 3. 部署指南
 ```markdown
 # validation_experiment/DEPLOYMENT_GUIDE.md
 
@@ -216,7 +241,8 @@ fsdp_config:
 - Rollback plan
 ```
 
-### 4. Raw Data
+<a id="4-raw-data"></a>
+### 4. 原始数据
 ```
 validation_experiment/
 ├── baseline_metrics.json
@@ -228,69 +254,78 @@ validation_experiment/
 └── comparison_summary.json
 ```
 
-## Iteration Logic
+<a id="iteration-logic"></a>
+## 迭代逻辑
 
-The validator may iterate (max 2 times) if:
-- ✅ Some improvement found (worth exploring further)
-- ✅ Clear failure pattern (can fix, e.g., all DP=1 → adjust to DP≥2)
-- ❌ Target not met yet
+满足以下情况时，验证器可以继续迭代，最多 2 次：
+- ✅ 已取得部分收益，值得继续探索
+- ✅ 失败模式明确且可以修复，例如全部 DP=1，则增加 DP≥2 约束
+- ❌ 尚未达到目标
 
-Stops iterating if:
-- ✅ Target met (success)
-- ❌ Max iterations reached (2)
-- ❌ No improvement possible (baseline optimal)
+以下情况停止迭代：
+- ✅ 已达到目标，运行成功
+- ❌ 达到迭代上限 2 次
+- ❌ 无法进一步改进，基线已经最优
 
-## Best Practices
+<a id="best-practices"></a>
+## 最佳实践
 
-1. **Run during off-peak hours** (occupies devices for 20-35 min)
-2. **Start with baseline** (always establish reference point)
-3. **Trust the heuristics** (learned from real experiments)
-4. **Validate before scaling** (cheaper to test on 8 devices than 64)
-5. **Document findings** (add to project memory for future reference)
+1. **在低峰期运行**，会占用设备 20～35 分钟
+2. **从基线开始**，始终建立比较参考
+3. **使用启发式规则**，这些规则来自真实实验
+4. **扩容前先验证**，在 8 个设备上测试比在 64 个设备上成本更低
+5. **记录发现**，写入项目记忆供后续参考
 
-## Safety
+<a id="safety"></a>
+## 安全要求
 
-- ✅ Read-only on model checkpoints
-- ✅ Writes only to `validation_experiment/`
-- ✅ No production impact (separate validation runs)
-- ✅ Auto-abort on critical errors (OOM, hang)
-- ✅ Max 2 iteration cycles (prevents infinite loops)
+- ✅ 只读访问模型检查点
+- ✅ 仅写入 `validation_experiment/`
+- ✅ 使用独立验证运行，不影响生产
+- ✅ OOM、挂起等严重错误会自动中止
+- ✅ 最多 2 轮迭代，避免无限循环
 
-## Cost Estimation
+<a id="cost-estimation"></a>
+## 成本估算
 
-**Per candidate**: 50 steps × training cost
-**Typical session**: 3-5 candidates
-**Total**: ~150-250 training steps equivalent
+**每个候选：** 50 步 × 训练成本。
+**典型会话：** 3～5 个候选。
+**总计：** 相当于约 150～250 个训练步。
 
-**ROI**: If finding 2x improvement, pays for itself in ~200 production steps
+**投资回报：** 如果找到 2 倍性能提升，约 200 个生产训练步即可抵消验证成本。
 
-## Troubleshooting
+<a id="troubleshooting"></a>
+## 故障排查
 
-### "No baseline found"
+<a id="no-baseline-found"></a>
+### “No baseline found”（未找到基线）
 ```
 → Point to existing training log
 → Or run 50 steps of baseline first
 ```
 
-### "All candidates failed"
+<a id="all-candidates-failed"></a>
+### “All candidates failed”（全部候选失败）
 ```
 → Check pre-flight (devices available, no OOM)
 → Review error patterns
 → May need manual intervention
 ```
 
-### "Winner worse than baseline"
+<a id="winner-worse-than-baseline"></a>
+### “Winner worse than baseline”（胜出候选差于基线）
 ```
 → Baseline may already be optimal
 → Try different optimization axis (e.g., batch size, learning rate)
 ```
 
-## References
+<a id="references"></a>
+## 参考资料
 
-- **Real experiment**: `validation_experiment/FINAL_REPORT_CANDIDATE4_WINS.md`
-- **Workflows**: `.agent/skills/strategy-validator/workflows/`
-- **Heuristics source**: Qwen3-30B-A3B validation (Oct 2026)
+- **真实实验：** `validation_experiment/FINAL_REPORT_CANDIDATE4_WINS.md`
+- **工作流：** `.agent/skills/strategy-validator/workflows/`
+- **启发式规则来源：** Qwen3-30B-A3B 验证，2026 年 10 月
 
 ---
 
-**Next Steps**: Invoke `/validate-strategy` to start optimization!
+**下一步：** 调用 `/validate-strategy` 开始优化！

@@ -1,15 +1,20 @@
-# Phase 1: Baseline Analysis
+<a id="phase-1-baseline-analysis"></a>
+# 阶段 1：基线分析
 
-## Objective
-Extract performance metrics from existing baseline training to establish comparison reference.
+<a id="objective"></a>
+## 目标
+从现有基线训练中提取性能指标，建立比较参考。
 
-## Inputs
-- Baseline training log (e.g., `output/training_demo/run_parallel_online.log`)
-- Baseline configuration (e.g., `train_parallel_online.yaml`)
+<a id="inputs"></a>
+## 输入
+- 基线训练日志，例如 `output/training_demo/run_parallel_online.log`
+- 基线配置，例如 `train_parallel_online.yaml`
 
-## Tasks
+<a id="tasks"></a>
+## 任务
 
-### 1. Locate baseline artifacts
+<a id="1-locate-baseline-artifacts"></a>
+### 1. 定位基线产物
 ```bash
 # Find most recent training log
 find output/training_demo -name "*.log" -type f -mtime -7
@@ -18,44 +23,48 @@ find output/training_demo -name "*.log" -type f -mtime -7
 ls -lh examples/training_demo/qwen3_moe/train_parallel_online.yaml
 ```
 
-### 2. Extract configuration
-Parse YAML to identify:
-- `accelerator`: tp_size, cp_size, ep_size, pp_size
-- `fsdp_config`: dp_shard_size, edp_shard_size
-- `training`: global_batch_size, micro_batch_size, train_iters
-- `data_transform`: max_seq_len
+<a id="2-extract-configuration"></a>
+### 2. 提取配置
+解析 YAML，识别：
+- `accelerator`：tp_size、cp_size、ep_size、pp_size
+- `fsdp_config`：dp_shard_size、edp_shard_size
+- `training`：global_batch_size、micro_batch_size、train_iters
+- `data_transform`：max_seq_len
 
-Calculate derived metrics:
-- Total devices = TP × CP × EP × PP × DP
-- DP size = total_devices / (TP × CP × EP × PP)
+计算派生指标：
+- 总设备数 = TP × CP × EP × PP × DP
+- DP 大小 = total_devices / (TP × CP × EP × PP)
 
-### 3. Extract performance metrics
-Parse training log using regex:
+<a id="3-extract-performance-metrics"></a>
+### 3. 提取性能指标
+使用正则表达式解析训练日志：
 ```python
 pattern = r'tokens/s=([\d.]+),?\s+step_time=([\d.]+)s.*memory/device_max_allocated_gb=([\d.]+)'
 ```
 
-Extract:
-- `throughput_tokens_per_sec`: Mean of last 30-50 steps (after warmup)
-- `std_tokens_per_sec`: Standard deviation (for stability check)
-- `step_time_ms`: Mean step time in milliseconds
-- `memory_per_device_gb`: Peak memory usage
+提取：
+- `throughput_tokens_per_sec`：预热后最后 30～50 步的均值
+- `std_tokens_per_sec`：标准差，用于稳定性检查
+- `step_time_ms`：平均步耗时，单位毫秒
+- `memory_per_device_gb`：峰值显存占用
 
-### 4. Identify bottlenecks
-Analyze step time components:
-- **Communication-bound**: Step time >> expected compute time
-  - Indicators: High TP/CP degree, short sequences, small models
-  - Solution: Reduce TP/CP
+<a id="4-identify-bottlenecks"></a>
+### 4. 识别瓶颈
+分析步耗时的组成：
+- **通信受限：** 步耗时远大于预期计算时间
+  - 特征：TP/CP 并行度高、序列短、模型小
+  - 处理方向：减小 TP/CP
 
-- **Computation-bound**: Step time ≈ expected compute time
-  - Indicators: Large models, long sequences, low TP/CP
-  - Solution: May already be optimal, or increase parallelism
+- **计算受限：** 步耗时约等于预期计算时间
+  - 特征：模型大、序列长、TP/CP 较低
+  - 处理方向：可能已经最优，或增加并行度
 
-- **Memory-bound**: Near OOM, frequent cache clearing
-  - Indicators: memory_allocated > 90% of device capacity
-  - Solution: Increase DP (FSDP sharding), reduce TP/PP
+- **显存受限：** 接近 OOM，频繁清理缓存
+  - 特征：memory_allocated 超过设备容量的 90%
+  - 处理方向：增大 DP，增加 FSDP 分片；减小 TP/PP
 
-### 5. Generate baseline report
+<a id="5-generate-baseline-report"></a>
+### 5. 生成基线报告
 ```json
 {
   "baseline": {
@@ -77,22 +86,24 @@ Analyze step time components:
 }
 ```
 
-## Outputs
+<a id="outputs"></a>
+## 输出
 - `validation_experiment/baseline_metrics.json`
-- Bottleneck diagnosis (communication / computation / memory)
-- Recommended optimization directions
+- 瓶颈诊断：通信、计算或显存
+- 建议的优化方向
 
-## Example (from Qwen3-30B-A3B experiment)
+<a id="example-from-qwen3-30b-a3b-experiment"></a>
+## 示例：Qwen3-30B-A3B 实验
 
-**Baseline**: TP=2, CP=2, EP=2, DP=2
-- Throughput: 1081.4 tokens/s
-- Step time: 722.8 ms
-- Memory: 6.81 GB
+**基线：** TP=2、CP=2、EP=2、DP=2。
+- 吞吐：1081.4 tokens/s
+- 步耗时：722.8 ms
+- 显存：6.81 GB
 
-**Bottleneck**: Communication (CP=2 for short seq_len=128)
+**瓶颈：** 通信，短序列 seq_len=128 却使用 CP=2。
 
-**Recommendation**: Remove CP, potentially reduce TP
+**建议：** 移除 CP，并考虑减小 TP。
 
 ---
 
-**Next**: Phase 2 (Candidate Generation)
+**下一步：** 阶段 2，候选生成。

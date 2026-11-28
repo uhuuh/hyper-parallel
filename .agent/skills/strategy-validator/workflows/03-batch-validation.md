@@ -1,17 +1,22 @@
-# Phase 3: Batch Validation
+<a id="phase-3-batch-validation"></a>
+# 阶段 3：批量验证
 
-## Objective
-Execute all candidate strategies in sequence, monitor for errors, and collect performance metrics.
+<a id="objective"></a>
+## 目标
+依次执行全部候选策略，监测错误并收集性能指标。
 
-## Inputs
-- List of candidates (from Phase 2)
-- Generated config files and launch scripts
-- Target hardware (one node from the authorized pool)
+<a id="inputs"></a>
+## 输入
+- 阶段 2 生成的候选列表
+- 已生成的配置文件和启动脚本
+- 目标硬件，使用已授权资源池中的一个节点
 
-## Execution Strategy
+<a id="execution-strategy"></a>
+## 执行策略
 
-### Sequential Validation (Recommended)
-Run candidates one at a time:
+<a id="sequential-validation-recommended"></a>
+### 顺序验证（推荐）
+一次运行一个候选：
 ```bash
 for candidate in candidate1 candidate2 candidate3; do
     echo "Running $candidate..."
@@ -30,11 +35,12 @@ for candidate in candidate1 candidate2 candidate3; do
 done
 ```
 
-**Pros**: Simple, easy to debug
-**Cons**: Sequential (3-5 candidates × 7 min = 20-35 min)
+**优点：** 简单、便于调试。
+**缺点：** 串行执行，3～5 个候选 × 7 分钟，总计 20～35 分钟。
 
-### Parallel Validation (Advanced)
-If multiple nodes available:
+<a id="parallel-validation-advanced"></a>
+### 并发验证（高级）
+有多个可用节点时：
 ```bash
 # Node 1
 bash validation_experiment/run_candidate1.sh &
@@ -45,12 +51,14 @@ bash validation_experiment/run_candidate2.sh &
 wait
 ```
 
-**Pros**: Faster (all candidates in ~7 min)
-**Cons**: Requires multiple nodes, harder to debug
+**优点：** 更快，全部候选约 7 分钟完成。
+**缺点：** 需要多个节点，调试更复杂。
 
-## Monitoring
+<a id="monitoring"></a>
+## 监测
 
-### Real-time Progress
+<a id="real-time-progress"></a>
+### 实时进度
 ```bash
 # Terminal 1: Run validation
 bash validation_experiment/run_candidate1.sh
@@ -59,52 +67,55 @@ bash validation_experiment/run_candidate1.sh
 tail -f validation_experiment/candidate1/validation_run.log | grep "Training:"
 ```
 
-### Error Detection
-Watch for these patterns:
+<a id="error-detection"></a>
+### 错误检测
+关注以下模式：
 
-**1. FSDP Conflict (DP=1 issue)**:
+**1. FSDP 冲突，DP=1 问题：**
 ```
 RuntimeError: A view was created in no_grad mode...
 ```
-→ Immediate rejection, skip candidate
+→ 立即拒绝并跳过该候选。
 
-**2. OOM**:
+**2. OOM：**
 ```
 NPU out of memory
 torch.cuda.OutOfMemoryError
 ```
-→ Note memory limit, suggest reduced parallelism
+→ 记录显存限制，建议降低并行度。
 
-**3. MoE Weight Error**:
+**3. MoE 权重错误：**
 ```
 ValueError: Detected fused MoE expert weights incompatible with TP sharding
 ```
-→ EP=1 not allowed, increase EP
+→ 不允许 EP=1，应增大 EP。
 
-**4. Hang (no progress)**:
+**4. 挂起，无进展：**
 ```bash
 # No log output for >60 seconds
 timeout 600 bash validation_experiment/run_candidate.sh
 ```
-→ Communication deadlock, abort and analyze
+→ 通信死锁，中止并分析。
 
-**5. NaN/Inf Loss**:
+**5. Loss 为 NaN/Inf：**
 ```
 training/foundation_loss=nan
 ```
-→ Gradient instability, check learning rate / grad clipping
+→ 梯度不稳定，检查学习率和梯度裁剪。
 
-## Success Criteria
+<a id="success-criteria"></a>
+## 成功标准
 
-A candidate is considered **successful** if:
-1. ✅ Completes 50 training steps without errors
-2. ✅ Throughput > baseline (any improvement)
-3. ✅ Memory within device limits (< 90% capacity)
-4. ✅ Stable performance (std < 10% of mean)
+满足以下条件的候选视为**成功**：
+1. ✅ 无错误完成 50 个训练步
+2. ✅ 吞吐超过基线，任何提升均可
+3. ✅ 显存在设备限制内，小于容量的 90%
+4. ✅ 性能稳定，标准差小于均值的 10%
 
-## Metrics Extraction
+<a id="metrics-extraction"></a>
+## 指标提取
 
-After each successful run, extract metrics:
+每次运行成功后提取指标：
 ```python
 import re, statistics
 
@@ -142,14 +153,16 @@ with open(f"validation_experiment/{candidate_id}/metrics.json", "w") as f:
     json.dump(metrics, f, indent=2)
 ```
 
-## Output
+<a id="output"></a>
+## 输出
 
-For each candidate, generate:
-- `validation_experiment/{candidate_id}/validation_run.log` — Full training log
-- `validation_experiment/{candidate_id}/metrics.json` — Extracted metrics
-- Status: ✅ Success / ❌ Failed (with error type)
+每个候选生成：
+- `validation_experiment/{candidate_id}/validation_run.log`：完整训练日志
+- `validation_experiment/{candidate_id}/metrics.json`：提取的指标
+- 状态：✅ 成功，或 ❌ 失败并附错误类型
 
-## Example Results
+<a id="example-results"></a>
+## 结果示例
 
 ```
 Candidate 1 (TP=2, CP=1, EP=2, DP=2):
@@ -176,4 +189,4 @@ Candidate 4 (TP=1, CP=1, EP=2, DP=4):
 
 ---
 
-**Next**: Phase 4 (Comparison & Iteration)
+**下一步：** 阶段 4，比较与迭代。

@@ -1,14 +1,16 @@
-# Phase 4: Comparison Report
+<a id="phase-4-comparison-report"></a>
+# 阶段 4：比较报告
 
-Compare actual validation metrics against PSA estimates and baseline configurations.
+将实际验证指标与 PSA 估算和基线配置比较。
 
-## 4.1 Input Sources
+<a id="41-input-sources"></a>
+## 4.1 输入来源
 
-**Three comparison dimensions:**
+**三个比较维度：**
 
-1. **PSA Estimates** (from parallel-strategy-analyzer output)
-2. **Actual Measurements** (from Phase 3 metrics extraction)
-3. **Baseline** (reference config, e.g., pure DP or user's current setup)
+1. **PSA 估算**，来自 parallel-strategy-analyzer 输出
+2. **实际测量**，来自阶段 3 的指标提取
+3. **基线**，例如纯 DP 或用户当前设置等参考配置
 
 ```python
 comparison_input = {
@@ -35,9 +37,11 @@ comparison_input = {
 }
 ```
 
-## 4.2 Accuracy Assessment
+<a id="42-accuracy-assessment"></a>
+## 4.2 准确性评估
 
-### 4.2.1 Compute Deltas
+<a id="421-compute-deltas"></a>
+### 4.2.1 计算差异
 
 ```python
 def compute_delta(actual, estimate, metric_name):
@@ -75,7 +79,8 @@ def compute_delta(actual, estimate, metric_name):
 # → delta = +5.7%, within ±20% → ✓ PASS
 ```
 
-### 4.2.2 Generate Comparison Table
+<a id="422-generate-comparison-table"></a>
+### 4.2.2 生成比较表
 
 ```python
 def generate_comparison_table(psa, actual, baseline=None):
@@ -124,7 +129,7 @@ def generate_comparison_table(psa, actual, baseline=None):
     return table
 ```
 
-**Rendered output:**
+**渲染结果：**
 
 ```
 ┌──────────────────┬────────────┬───────────┬────────┬────────────┐
@@ -140,9 +145,10 @@ def generate_comparison_table(psa, actual, baseline=None):
 Overall Assessment: ✓ VALIDATED (5/5 metrics within tolerance)
 ```
 
-## 4.3 Baseline Comparison
+<a id="43-baseline-comparison"></a>
+## 4.3 与基线比较
 
-If baseline provided, show improvement:
+提供基线时，展示改进：
 
 ```python
 def compare_to_baseline(actual, baseline):
@@ -167,7 +173,7 @@ def compare_to_baseline(actual, baseline):
     }
 ```
 
-**Rendered:**
+**渲染结果：**
 
 ```
 Comparison to Baseline (dp=64, tp=1, pp=1):
@@ -178,11 +184,13 @@ Baseline status: OOM at seq_len=4096
 New strategy: Fits comfortably with 19% headroom
 ```
 
-## 4.4 Diagnostic Analysis
+<a id="44-diagnostic-analysis"></a>
+## 4.4 诊断分析
 
-### 4.4.1 Memory Breakdown
+<a id="441-memory-breakdown"></a>
+### 4.4.1 显存分解
 
-If actual memory significantly exceeds estimate:
+实际显存明显超过估算时：
 
 ```python
 def diagnose_memory_overage(actual_gb, estimate_gb, threshold=10):
@@ -217,9 +225,10 @@ def diagnose_memory_overage(actual_gb, estimate_gb, threshold=10):
     }
 ```
 
-### 4.4.2 Throughput Gap
+<a id="442-throughput-gap"></a>
+### 4.4.2 吞吐差距
 
-If actual throughput << estimate:
+实际吞吐远低于估算时：
 
 ```python
 def diagnose_throughput_gap(actual_tps, estimate_tps, comm_breakdown):
@@ -254,9 +263,10 @@ def diagnose_throughput_gap(actual_tps, estimate_tps, comm_breakdown):
     }
 ```
 
-## 4.5 Multi-Candidate Ranking
+<a id="45-multi-candidate-ranking"></a>
+## 4.5 多候选排名
 
-If validating Top-3 strategies:
+验证前三个策略时：
 
 ```python
 def rank_candidates(candidates):
@@ -313,7 +323,7 @@ def rank_candidates(candidates):
     return ranked
 ```
 
-**Rendered:**
+**渲染结果：**
 
 ```
 Multi-Candidate Validation Results:
@@ -332,9 +342,10 @@ Recommendation: Deploy candidate #1 (dp=4,tp=8,pp=2)
   - All metrics validated within tolerance
 ```
 
-## 4.6 Final Report Structure
+<a id="46-final-report-structure"></a>
+## 4.6 最终报告结构
 
-**Complete validation report:**
+**完整验证报告：**
 
 ```markdown
 # Strategy Validation Report
@@ -429,7 +440,8 @@ mesh = init_device_mesh("npu", (4, 2, 8), mesh_dim_names=("dp", "pp", "tp"))
 **Launch script:** `scripts/run_validation_20261016_143052.sh`
 ```
 
-## 4.7 Exit Codes
+<a id="47-exit-codes"></a>
+## 4.7 退出码
 
 ```python
 EXIT_CODES = {
@@ -440,7 +452,8 @@ EXIT_CODES = {
 }
 ```
 
-## 4.8 Output Artifacts
+<a id="48-output-artifacts"></a>
+## 4.8 输出产物
 
 ```
 validation_report_20261016_143522.md        # Human-readable report

@@ -1,0 +1,50 @@
+parallel-strategy-analyzer：并行策略规划
+=======================================
+
+职责和边界
+
+- 入口为 .agent/skills/parallel-strategy-analyzer/SKILL.md。
+- 根据模型、设备和工作负载约束，推荐 DP/FSDP/TP/PP/CP/EP 组合。
+- 同时分析显存、通信、计算和流水线气泡，给出重计算、offload 等适用建议。
+- 在模型适配流程中用于 S0 规划；性能优化时也可重新用于形成候选。
+- 输出是估算与建议，不是已经验证的可执行训练结果。
+
+fun 并行策略规划(任务) {
+    READ(".agent/skills/parallel-strategy-analyzer/references/io-contract.md")
+    信息 = 按01收集模型设备及约束(任务)
+    // 模型名称或参数量、设备数量、设备类型为必要信息。
+    // 文档未提供时的默认值：seq_len=4096、global_batch=1024、micro_batch=1、bf16、adam。
+    // 使用已有实际配置时保留其工作负载，不把估算默认值当成任务事实。
+    全局基线 = 按02估算无并行显存及FLOPs(信息)
+    候选 = 按03枚举并剪枝并行组合(信息, 全局基线)
+
+    for 方案 in 候选 {
+        通信与气泡 = 按04估算各维通信及重叠(方案, 信息)
+        分片显存 = 按05估算各设备状态和激活占用(方案, 信息)
+        评分 = 按05文档公式排序(方案, 分片显存, 通信与气泡)
+        // 超过90%显存容量的候选淘汰。
+        // 评分 = 100*估算MFU + 20*(1-abs(显存利用率-0.75)) - 2*启用并行维度数。
+        // 估算MFU来自理论计算时间、暴露通信和气泡，不是实测MFU。
+        保存候选分析(方案, 评分)
+    }
+
+    return 汇总基线推荐及备选(
+        推荐布局, DeviceMesh示例, 分片显存, 通信分解,
+        气泡, 显存优化建议, Top3备选, 估算假设及限制
+    )
+}
+
+实际文件和后续使用
+
+- workflows/01-collect-model-info.md：输入、模型与硬件信息、默认值。
+- workflows/02-global-baseline.md：未分片显存与模型计算量。
+- workflows/03-strategy-search.md：候选枚举及剪枝。
+- workflows/04-cost-analysis.md：通信量、重叠和流水线气泡。
+- workflows/05-scoring-output.md：分片显存、启发式评分及报告格式。
+- references/known-models.md、known-hardware.md、strategy-rules.md：参数和选择规则。
+- 本 Skill 没有一条运行上述全部分析的统一 Python CLI；Agent 按文档执行分析。
+- strategy-validator/workflows/01-config-generation.md 描述如何把选定建议转成训练配置。
+- 推荐配置可用于 S1 Recipe；S3 验证矩阵另行覆盖所需布局与重计算等条件。
+- Top1估算不代表性能已最优，不表示必须只测Top1，也不表示必须执行全部备选。
+
+

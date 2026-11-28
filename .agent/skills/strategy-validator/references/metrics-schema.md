@@ -1,16 +1,20 @@
-# Metrics Schema
+<a id="metrics-schema"></a>
+# 指标规范
 
-Standardized metric definitions and extraction rules for strategy validation.
+并行策略验证的标准化指标定义和提取规则。
 
-## Metric Taxonomy
+<a id="metric-taxonomy"></a>
+## 指标分类
 
-### P0: Core Performance Metrics
+<a id="p0-core-performance-metrics"></a>
+### P0：核心性能指标
 
-Required for all validation runs, directly comparable to PSA estimates.
+所有验证运行都必须提供，可直接与 PSA 估算比较。
 
-#### 1. Throughput
+<a id="1-throughput"></a>
+#### 1. 吞吐
 
-**Definition:** Training speed measured in tokens or samples processed per second.
+**定义：** 每秒处理的 token 数或样本数，用于衡量训练速度。
 
 ```python
 {
@@ -27,22 +31,23 @@ Required for all validation runs, directly comparable to PSA estimates.
 }
 ```
 
-**Extraction rule:**
-- Parse from log lines: `tokens/s=(\d+\.?\d*)([KM]?)`
-- Exclude first N warmup steps (default: 10)
-- Compute statistics over remaining steps
-- Convert K/M suffixes: K=1e3, M=1e6
+**提取规则：**
+- 从日志解析：`tokens/s=(\d+\.?\d*)([KM]?)`
+- 排除最前面的 N 个预热步，默认 10 步
+- 在剩余步骤上计算统计值
+- 转换 K/M 后缀：K=1e3，M=1e6
 
-**Tolerance:** ±15% vs PSA estimate
+**容差：** 相对 PSA 估算为 ±15%。
 
-**Example log line:**
+**日志行示例：**
 ```
 [Step 11/50] loss=2.298, throughput=28.5 samples/s, tokens/s=116.7K, step_time=1.23s
 ```
 
-#### 2. Memory
+<a id="2-memory"></a>
+#### 2. 显存
 
-**Definition:** Peak GPU/NPU memory allocated per device.
+**定义：** 每个 GPU/NPU 设备已分配显存的峰值。
 
 ```python
 {
@@ -63,21 +68,22 @@ Required for all validation runs, directly comparable to PSA estimates.
 }
 ```
 
-**Extraction rule:**
-- Parse from log: `max_allocated=(\d+\.?\d*)GB`
-- Track maximum across all logged steps per rank
-- Average across ranks (expect <5% variance for homogeneous workloads)
+**提取规则：**
+- 从日志解析：`max_allocated=(\d+\.?\d*)GB`
+- 对每个 rank，取所有已记录步骤中的最大值
+- 对各 rank 求平均；同构工作负载的预期差异小于 5%
 
-**Tolerance:** ±20% vs PSA estimate
+**容差：** 相对 PSA 估算为 ±20%。
 
-**Example log line:**
+**日志行示例：**
 ```
 [Memory] Rank 0: allocated=58.2GB, reserved=61.4GB, max_allocated=61.1GB
 ```
 
-#### 3. Model FLOPs Utilization (MFU)
+<a id="3-model-flops-utilization-mfu"></a>
+#### 3. 模型 FLOPs 利用率（MFU）
 
-**Definition:** Ratio of actual compute FLOPs to theoretical peak hardware FLOPs.
+**定义：** 实际计算 FLOPs 与硬件理论峰值 FLOPs 的比值。
 
 ```python
 {
@@ -92,28 +98,18 @@ Required for all validation runs, directly comparable to PSA estimates.
 }
 ```
 
-**Calculation:** Prefer the framework's built-in `training.mfu` telemetry,
-which publishes `performance/mfu_percent` using its PaLM-style model-FLOP
-convention. See
-[MFU accounting and targets](../../perf-playbook/references/mfu-targets.md).
+**计算：** 优先使用框架内置的 `training.mfu` 遥测，它按 PaLM 风格的模型 FLOP 口径发布 `performance/mfu_percent`，参见 [MFU 核算与目标](../../perf-playbook/references/mfu-targets.md)。
 
-An offline recomputation must use the same convention.
-`6 × N_active` already includes forward and backward work; multiplying it
-by two again doubles the reported MFU incorrectly. Include the supported
-attention term `12 × L × H × d_head × S` rather than dropping it.
+离线重算必须采用相同口径。`6 × N_active` 已包含前向和反向工作；再次乘二会错误地将 MFU 翻倍。保留所支持的注意力项 `12 × L × H × d_head × S`，不要将其省略。
 
-**Prediction uncertainty:** A PSA estimate is not an acceptance threshold.
-Calibrate prediction error for the model family and operating region, and
-report the measured result with its declared accounting convention.
+**预测不确定性：** PSA 估算不是验收阈值。应针对模型家族和运行区间校准预测误差，并在报告实测结果时声明核算口径。
 
-**Comparison:** Use a target relative to a measured baseline or a documented
-roofline analysis. Do not impose a universal MFU range on a model family.
-Sparse MoE with a matrix optimizer and dense training can have very
-different useful-compute fractions.
+**比较：** 使用相对实测基线的目标，或有文档依据的 roofline 分析。不要对某个模型家族强加通用 MFU 范围。使用矩阵优化器的稀疏 MoE 与稠密训练，其有效计算占比可能明显不同。
 
-#### 4. Step Time
+<a id="4-step-time"></a>
+#### 4. 步耗时
 
-**Definition:** Wall-clock time per training step (forward + backward + optimizer).
+**定义：** 每个训练步的墙钟耗时，包含前向、反向和优化器更新。
 
 ```python
 {
@@ -129,21 +125,23 @@ different useful-compute fractions.
 }
 ```
 
-**Extraction rule:**
-- Parse from log: `step_time=(\d+\.?\d*)s`
-- Convert to milliseconds
-- Exclude warmup steps
-- Flag if std > 10% of mean (unstable)
+**提取规则：**
+- 从日志解析：`step_time=(\d+\.?\d*)s`
+- 转换为毫秒
+- 排除预热步
+- 标准差超过均值的 10% 时，标记为不稳定
 
-**Tolerance:** ±15% vs PSA estimate
+**容差：** 相对 PSA 估算为 ±15%。
 
-### P1: Communication & Pipeline Metrics
+<a id="p1-communication--pipeline-metrics"></a>
+### P1：通信与流水线指标
 
-Required when parallel dimensions active (TP/CP/EP/PP > 1).
+并行维度启用时必须提供，即 TP/CP/EP/PP > 1。
 
-#### 5. Communication Breakdown
+<a id="5-communication-breakdown"></a>
+#### 5. 通信分解
 
-**Definition:** Time spent in collective operations, extracted from profiler traces.
+**定义：** 从性能追踪中提取的集合通信操作耗时。
 
 ```python
 {
@@ -175,21 +173,22 @@ Required when parallel dimensions active (TP/CP/EP/PP > 1).
 }
 ```
 
-**Extraction rule:**
-- Parse Torch profiler JSON (`*.pt.trace.json`)
-- Filter events by name (case-insensitive match on collective names)
-- Sum durations per operation type
-- Attribute to dimension based on operation pattern:
-  - AllReduce × 4 per layer → TP
-  - AllGather + ReduceScatter → FSDP (DP)
+**提取规则：**
+- 解析 Torch profiler JSON，`*.pt.trace.json`
+- 根据名称筛选事件，与集合通信名称进行不区分大小写的匹配
+- 按操作类型汇总耗时
+- 根据操作模式归属到并行维度：
+  - 每层 4 次 AllReduce → TP
+  - AllGather + ReduceScatter → FSDP（DP）
   - Send/Recv → PP
   - AllToAll → EP
 
-**Tolerance:** ±30% vs PSA estimate (communication highly sensitive to network variance)
+**容差：** 相对 PSA 估算为 ±30%；通信对网络波动高度敏感。
 
-#### 6. Pipeline Bubble
+<a id="6-pipeline-bubble"></a>
+#### 6. 流水线气泡
 
-**Definition:** Idle time ratio in pipeline parallel (PP > 1 only).
+**定义：** 流水线并行中的空闲时间比例，仅适用于 PP > 1。
 
 ```python
 {
@@ -205,27 +204,29 @@ Required when parallel dimensions active (TP/CP/EP/PP > 1).
 }
 ```
 
-**Extraction rule:**
-- From profiler trace: categorize events as "compute" (forward/backward kernels) vs "idle" (wait/recv)
+**提取规则：**
+- 从追踪中将事件分类为计算，即前向/反向内核，以及空闲，即等待/接收
 - `bubble_ratio = idle_time / (idle_time + compute_time)`
-- If profiler unavailable, estimate from theoretical formula:
+- profiler 不可用时，根据理论公式估算：
   ```python
   bubble_1f1b = (pp - 1) / (num_microbatches + pp - 1)
   ```
 
-**Tolerance:** ±5 percentage points vs PSA estimate
+**容差：** 相对 PSA 估算为 ±5 个百分点。
 
-**Assessment:**
-- ≤5%: Excellent
-- 5-10%: Good
-- 10-20%: Acceptable (recommend interleaved schedule)
-- >20%: Poor (increase microbatches or reduce PP)
+**评估：**
+- ≤5%：优秀
+- 5～10%：良好
+- 10～20%：可接受，建议交错调度
+- >20%：较差，应增加微批数或减小 PP
 
-### P2: Diagnostic Metrics
+<a id="p2-diagnostic-metrics"></a>
+### P2：诊断指标
 
-Optional, for deep analysis or debugging.
+可选，用于深入分析或调试。
 
-#### 7. Loss Trajectory
+<a id="7-loss-trajectory"></a>
+#### 7. Loss 轨迹
 
 ```python
 {
@@ -239,9 +240,10 @@ Optional, for deep analysis or debugging.
 }
 ```
 
-**Use case:** Detect numerical instability (NaN/Inf indicates config issue).
+**使用场景：** 检测数值不稳定，NaN/Inf 表示配置存在问题。
 
-#### 8. Gradient Norm
+<a id="8-gradient-norm"></a>
+#### 8. 梯度范数
 
 ```python
 {
@@ -254,9 +256,10 @@ Optional, for deep analysis or debugging.
 }
 ```
 
-**Use case:** Diagnose mixed-precision issues or exploding gradients.
+**使用场景：** 诊断混合精度问题或梯度爆炸。
 
-#### 9. Device Utilization (from profiler)
+<a id="9-device-utilization-from-profiler"></a>
+#### 9. 设备利用率（来自 profiler）
 
 ```python
 {
@@ -268,13 +271,15 @@ Optional, for deep analysis or debugging.
 }
 ```
 
-**Use case:** Identify compute vs memory-bound workloads.
+**使用场景：** 判断工作负载受计算还是内存限制。
 
 ---
 
-## Extraction Pipeline
+<a id="extraction-pipeline"></a>
+## 提取流程
 
-### Step 1: Parse Training Log
+<a id="step-1-parse-training-log"></a>
+### 步骤 1：解析训练日志
 
 ```python
 import re
@@ -351,7 +356,8 @@ def parse_training_log(log_path: str, warmup_steps: int = 10) -> Dict:
     return metrics
 ```
 
-### Step 2: Compute Statistics
+<a id="step-2-compute-statistics"></a>
+### 步骤 2：计算统计值
 
 ```python
 import numpy as np
@@ -409,7 +415,8 @@ def compute_statistics(metrics: Dict) -> Dict:
     return result
 ```
 
-### Step 3: Parse Profiler Trace
+<a id="step-3-parse-profiler-trace"></a>
+### 步骤 3：解析性能追踪
 
 ```python
 import json
@@ -459,7 +466,8 @@ def parse_profiler_trace(trace_path: str) -> Dict:
     }
 ```
 
-### Step 4: Consolidate Output
+<a id="step-4-consolidate-output"></a>
+### 步骤 4：汇总输出
 
 ```python
 def generate_metrics_json(log_path, profiler_path, model_config, hardware_config):
@@ -500,9 +508,11 @@ def generate_metrics_json(log_path, profiler_path, model_config, hardware_config
 
 ---
 
-## Validation Rules
+<a id="validation-rules"></a>
+## 验证规则
 
-### Metric Completeness Check
+<a id="metric-completeness-check"></a>
+### 指标完整性检查
 
 ```python
 def validate_metrics_completeness(metrics: Dict) -> Dict:
@@ -535,7 +545,8 @@ def validate_metrics_completeness(metrics: Dict) -> Dict:
     }
 ```
 
-### Tolerance Assessment
+<a id="tolerance-assessment"></a>
+### 容差评估
 
 ```python
 def assess_tolerance(actual: float, estimate: float, tolerance_pct: float) -> Dict:
@@ -555,9 +566,10 @@ def assess_tolerance(actual: float, estimate: float, tolerance_pct: float) -> Di
 
 ---
 
-## Output Format
+<a id="output-format"></a>
+## 输出格式
 
-Final `validation_metrics.json`:
+最终的 `validation_metrics.json`：
 
 ```json
 {
@@ -582,13 +594,15 @@ Final `validation_metrics.json`:
 
 ---
 
-## MoE-Specific Metrics (MoE Models Only)
+<a id="moe-specific-metrics-moe-models-only"></a>
+## MoE-Specific Metrics（MoE 专用指标，仅限 MoE 模型）
 
-**Load when `model.is_moe == True`**
+**`model.is_moe == True` 时加载。**
 
-For detailed definitions, formulas, and collection methods, see [moe-metrics.md](moe-metrics.md).
+详细定义、公式和采集方法参见 [moe-metrics.md](moe-metrics.md)。
 
-### Expert Load Metrics
+<a id="expert-load-metrics"></a>
+### 专家负载指标
 
 ```json
 {
@@ -603,7 +617,8 @@ For detailed definitions, formulas, and collection methods, see [moe-metrics.md]
 }
 ```
 
-### Communication Metrics
+<a id="communication-metrics"></a>
+### 通信指标
 
 ```json
 {
@@ -618,7 +633,8 @@ For detailed definitions, formulas, and collection methods, see [moe-metrics.md]
 }
 ```
 
-### Routing Efficiency
+<a id="routing-efficiency"></a>
+### 路由效率
 
 ```json
 {
@@ -633,4 +649,4 @@ For detailed definitions, formulas, and collection methods, see [moe-metrics.md]
 }
 ```
 
-**Complete specification:** [moe-metrics.md](moe-metrics.md)
+**完整规范：** [moe-metrics.md](moe-metrics.md)

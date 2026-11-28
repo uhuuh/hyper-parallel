@@ -1,0 +1,57 @@
+S3 分布式等价
+==============
+
+阶段表直接要求
+
+- 使用 hf-model-precision-validation、cluster-debug†。
+- 开启 model_integration.mode=runtime，使用全精度 loss、梯度范数及逐步全局输入哈希。
+- 重计算开关的比较、确定性重跑要求精确一致。
+- 跨布局从相同发布权重和 token-uniform 语料开始，早期步精确一致，记录分叉起点及增长。
+- 通用工具包 judge_equivalence.py 逐步委托 compare_scalar_curves 判定。
+- 退出条件为所有目标布局满足各自标准。
+
+fun S3_分布式等价(任务, S0结果, S1结果, S2结果) {
+    精度指南 = READ(".agent/skills/hf-model-precision-validation/SKILL.md")
+    交接检查 = 核验S2交接证据及引用文件(S2结果.交接证据)
+    if !交接检查.通过 {
+        return { 状态: "BLOCKED", 缺失项: 交接检查.缺失项 }
+    }
+
+    # TODO 有必要进行这一步吗？rsi优化出最佳配置，有必要使用其他配置吗？另外是不是不需要预先生成一个检查矩阵，再后续rsi迭代过程中，再进行正确性检查不行吗？
+    矩阵 = 制定目标布局重计算和重跑矩阵(S0结果.迁移规格, 精度指南) # 围绕设置并行，验证一下不同并行和重计算组合的精度
+    比较条件 = 固定发布权重输入及运行证据设置(矩阵, 任务, 精度指南)
+
+    矩阵结果 = SKILL(
+        "hf-model-precision-validation",
+        { 范围: "分布式等价", 候选: S1结果, S2交接: S2结果, 矩阵, 比较条件 }
+    )
+
+    if 矩阵结果.存在分布式故障 {
+        诊断结果 = SKILL("cluster-debug", { 矩阵, 失败证据: 矩阵结果 })
+        return { 状态: "BLOCKED", 矩阵, 矩阵结果, 诊断结果 }
+        // 修复后的重跑需产生新证据，再检查受影响单元。
+    }
+
+    缺失项 = 检查所有目标布局及其比较证据(矩阵, 矩阵结果)
+    return {
+        状态: if 缺失项.为空 "PASS" else "BLOCKED",
+        矩阵, 比较条件, 矩阵结果, 缺失项
+    }
+}
+
+关联执行入口和产物
+
+- .agent/skills/hf-model-precision-validation/SKILL.md，执行前阅读其 references/matrix-acceptance.md 等对应资料。
+- 注册路线使用 model_integration validate --manifest ... --generate-only 生成矩阵，再用 validate 执行。
+- 实现在 hyper_parallel/tools/model_integration/cli.py、case_matrix.py、case_compare.py。
+- 精度 Skill 对正式矩阵要求至少十个连续对齐的优化器步骤，检查 loss 和全局 pre-clip grad_norm，同时检查输入和学习率。
+- 阶段表对跨布局早期精确一致及分叉记录另有要求，报告须分别说明采用的协议、步骤和比较精度。
+- 文本工具包使用 run_hf_text.sh、run_hf_text_dist.sh 启动各单元，judge_equivalence.py 比较证据。
+- .agent/examples/hf_text_bringup/judge_equivalence.py 支持 runtime 结构化证据。
+- .agent/examples/hf_text_bringup/reproduce/reproduce.sh 的 stage_s3() 提供已记录模型的复现单元。
+- 该复现脚本默认 S3_EVIDENCE=printed。满足当前阶段的结构化证据要求时需用 structured 路线，并验证实际产物。
+- .agent/skills/cluster-debug/SKILL.md 用于多 rank 故障诊断。
+- 产物包含等价矩阵、逐单元日志、metrics.jsonl、comparison.json，工具包判定记录可为 judge.txt。
+- CLI 矩阵还生成 cases/resolved_cases.json。无法运行单元需记录原因和覆盖缺口。
+
+

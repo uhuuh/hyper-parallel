@@ -1,10 +1,7 @@
-# Configuration, proposal, and evidence contracts v1
+<a id="configuration-proposal-and-evidence-contracts-v1"></a>
+# 配置、方案与证据协议 v1
 
-The Agent generates paths and commands for the current experiment. Replace
-`/absolute/...` placeholders below with real files. The controller executes argv lists,
-not shell strings. Put SSH, environment setup, or torchrun orchestration in a reviewed
-script and invoke that script through argv. `validator_files` contains acceptance
-implementations and dependencies; these are not candidate tuning targets.
+Agent 为当前实验生成路径和命令。请将下文的 `/absolute/...` 占位符替换为实际文件。控制器执行 argv 列表，不执行 Shell 字符串。SSH、环境准备和 torchrun 编排应放入经过审阅的脚本，再通过 argv 调用。`validator_files` 包含验收实现及其依赖，这些文件不能作为候选调优目标。
 
 ## run.json
 
@@ -44,23 +41,14 @@ implementations and dependencies; these are not candidate tuning targets.
 }
 ```
 
-376, 20, and 2% are illustrative values. They do not establish the hardware peak,
-achievable target, or actual noise. Calibrate noise with same-node A/A measurements
-or existing comparable records. Additional workload fields are allowed; every field
-is compared.
+376、20 和 2% 只是示例值，不代表硬件峰值、可实现的目标或实际噪声。使用同节点 A/A 测量或已有的可比记录校准噪声。允许添加工作负载字段；每个字段都会参与比较。
 
-`rsi_mode` defaults to `acceptance`; choose `continuous` for consolidation between
-completed trials. Optional `learning_repository` identifies the current HP
-checkout receiving portable improvements; otherwise the trial workspace is used.
-Use a separate checkout for changes to frozen source or validators. See the
-[consolidation contract](../../autoresearch/references/experience-consolidation.md).
+`rsi_mode` 默认为 `acceptance`；若需在已完成实验之间整理经验，可选择 `continuous`。可选的 `learning_repository` 指定接收可移植改进的当前 HP 代码副本；未指定时使用实验工作区。对已冻结源码或验证器的修改应在独立代码副本中进行，参见[经验整理协议](../../autoresearch/references/experience-consolidation.md)。
 
-## Performance policy
+<a id="performance-policy"></a>
+## 性能策略
 
-Add `performance_policy` to the run configuration when using the S4 performance workflow.
-Add `workload.model_config_sha256` with the digest of the pinned model definition and
-include every tunable field in the initial workload. The following example permits
-sequence length and global batch changes.
+使用 S4 性能流程时，在运行配置中添加 `performance_policy`。添加 `workload.model_config_sha256`，记录固定模型定义的摘要，并在初始工作负载中包含所有可调字段。下面的示例允许修改序列长度和全局批量。
 
 ```json
 {
@@ -71,23 +59,16 @@ sequence length and global batch changes.
 }
 ```
 
-- `screening` uses a declared post-warmup window and an implementation correctness
-  check. `acceptance` requires at least 20 steady-state steps and the full numerical
-  check. A screening run can retain a candidate for further testing.
-- Omit the threshold when the task has no low-MFU policy. Below the configured threshold,
-  `status` returns `plan_from_critical_path` and the target-to-best throughput multiplier
-  for the current workload. The planner sizes candidate gains from measured exposed time.
-- With a validated best result, `status` includes the nonnegative fixed-work time savings
-  required and the corresponding step-time budget under the same MFU convention.
-- List only workload fields the task leaves open. Supported fields are `sequence_length`,
-  `micro_batch_size`, `global_batch_size`, and `gradient_accumulation_steps`.
-- Use `{"method": "approximation", "max_relative_error": 0.02}` with a declared
-  relative error limit and per-step reference calculations. The controller checks
-  the approximation against the architecture-aware breakdown.
+- `screening` 使用声明的预热后窗口和实现正确性检查。`acceptance` 要求至少 20 个稳态步及完整数值检查。筛选运行可以保留候选，供后续测试。
+- 任务未规定低 MFU 策略时，省略该阈值。低于配置的阈值时，`status` 返回 `plan_from_critical_path`，以及当前工作负载下目标吞吐相对最佳吞吐的倍数。规划时应根据实测的未被掩盖耗时估算候选收益。
+- 已有经过验证的最佳结果时，`status` 会给出在固定工作量下还需节省的时间（非负值），以及相同 MFU 口径下对应的单步时间预算。
+- 只列出任务允许调整的工作负载字段。支持的字段为 `sequence_length`、`micro_batch_size`、`global_batch_size` 和 `gradient_accumulation_steps`。
+- 使用 `{"method": "approximation", "max_relative_error": 0.02}` 时，应声明相对误差上限，并提供逐步参考计算。控制器会将近似值与按模型架构分解的结果进行核对。
 
-## Linked series
+<a id="linked-series"></a>
+## 关联序列
 
-Initialize a capacity or acceptance series from the current validated parent result.
+从当前已验证的父序列结果初始化容量序列或验收序列。
 
 ```bash
 python .agent/skills/mfu-riser/scripts/mfu_riser.py init \
@@ -95,21 +76,13 @@ python .agent/skills/mfu-riser/scripts/mfu_riser.py init \
   --parent-run /path/to/parent-series
 ```
 
-A capacity series changes only fields declared tunable in the parent. It keeps the
-model definition, initial state, data identity, routing, hardware, and accounting
-convention. Measure a new baseline and compare later trials against its own best.
+容量序列只修改父序列声明为可调的字段，保留模型定义、初始状态、数据身份、路由、硬件和核算口径。为新序列测量基线，后续实验与该序列自身的最佳结果比较。
 
-An acceptance series changes `validation_level` from `screening` to `acceptance`
-and can extend `train_steps` and `window`. Its first trial replays the screened source
-manifest and inherits its engagement checks. Run an independent confirmation after
-acceptance. Both transitions record the parent run, trial, result digest, and source
-digest. They begin with an empty baseline and best record.
+验收序列将 `validation_level` 从 `screening` 改为 `acceptance`，并可延长 `train_steps` 和 `window`。首轮实验重跑筛选胜出的源码清单，并继承其路径生效检查。验收后还应执行独立确认。两种转换都会记录父运行、父实验、结果摘要和源码摘要；新序列的基线和最佳结果记录初始均为空。
 
 ## plan.json
 
-A baseline uses `kind=baseline, parent=null, actions=[]`, with `workspace` and
-`source_paths`. The following candidate is hypothetical and does not assert that
-RMSNorm is a hotspot in the current model.
+基线使用 `kind=baseline, parent=null, actions=[]`，并指定 `workspace` 和 `source_paths`。下面的候选仅用于举例，并不表示 RMSNorm 是当前模型的热点。
 
 ```json
 {
@@ -129,36 +102,20 @@ RMSNorm is a hotspot in the current model.
 }
 ```
 
-With `performance_policy`, `operator_scope` can be `compute_fusion`,
-`equivalent_implementation`, `parallel_layout`, `communication`,
-`activation_memory`, or `optimizer`. The equivalent implementation scope includes
-kernel and module replacements. Every scope preserves the frozen workload and
-optimizer semantics. Describe the measured bottleneck, affected path, and expected
-complete-step effect in the existing proposal fields.
+配置 `performance_policy` 后，`operator_scope` 可以是 `compute_fusion`、`equivalent_implementation`、`parallel_layout`、`communication`、`activation_memory` 或 `optimizer`。等价实现范围包括内核和模块替换。所有范围都必须保留冻结的工作负载和优化器语义。在现有方案字段中说明实测瓶颈、受影响路径和预期的完整训练步收益。
 
-`source_paths` includes all files or directories affecting measured code, configuration,
-and launchers, relative to `workspace`. Exclude output directories; otherwise writing
-training logs would trigger source-change detection. Freeze more than the edited file.
-Use a worktree, independent checkout, or copied directory for isolation. Explicit feature
-switches in a shared directory are supported, but after failure the Agent must resume
-from the configuration referenced by `best`. The controller does not revert user files.
+`source_paths` 应包含所有影响被测代码、配置和启动器的文件或目录，路径相对 `workspace`。排除输出目录，否则写入训练日志也会触发源码变更检测。冻结范围不能仅限于编辑的文件。使用 worktree、独立代码副本或复制目录进行隔离。也支持在共享目录中使用显式功能开关，但实验失败后，Agent 必须从 `best` 引用的配置继续。控制器不会恢复用户文件。
 
-A confirmation uses `kind=confirm`, with `parent` pointing to the current best and identical
-`workspace`, `source_paths`, and `actions`. The controller requires an identical source
-manifest digest; confirmation cannot include new changes.
+确认实验使用 `kind=confirm`，`parent` 指向当前最佳结果，并使用相同的 `workspace`、`source_paths` 和 `actions`。控制器要求源码清单摘要相同；确认实验不能包含新修改。
 
-## Runtime environment
+<a id="runtime-environment"></a>
+## 运行环境
 
-All five stages receive `RISER_TRIAL_DIR` (a unique absolute directory),
-`RISER_TRIAL_TOKEN`, `RISER_CONTEXT` (`context.json`), `RISER_SOURCE_DIGEST`, and
-`RISER_WORKSPACE`. Context records the configuration, plan, source manifest, and reference
-trial. The adapter must not present these expected values as worker measurements.
-Workers compute and record source hashes and actual workloads independently. Result files
-must originate from this trial. Validation reads raw evidence and exits nonzero on failure.
+五个阶段都会收到 `RISER_TRIAL_DIR`（唯一的绝对目录）、`RISER_TRIAL_TOKEN`、`RISER_CONTEXT`（`context.json`）、`RISER_SOURCE_DIGEST` 和 `RISER_WORKSPACE`。上下文记录配置、计划、源码清单和参考实验。适配器不得将这些预期值冒充为工作进程的实测值。工作进程应独立计算并记录源码哈希和实际工作负载。结果文件必须来自本轮实验。验证应读取原始证据，失败时以非零退出码结束。
 
 ## measurement.json
 
-The validator writes `RISER_TRIAL_DIR/measurement.json`.
+验证器写入 `RISER_TRIAL_DIR/measurement.json`。
 
 ```text
 schema: "mfu-riser-measurement/v1"
@@ -181,19 +138,9 @@ checks: {
 profile_state: "profile/state.json"
 ```
 
-All evidence paths must be inside the current trial, and each `sha256` must match its
-raw check report. Baseline input and numerical checks validate the reference
-implementation against the declared data. Candidate checks compare with the frozen
-reference path. Nonempty or finite outputs alone cannot establish
-`numerical_equivalence=true`.
+所有证据路径必须位于当前实验目录内，每个 `sha256` 都必须与对应的原始检查报告匹配。基线的输入和数值检查用于验证参考实现是否符合声明的数据；候选检查则与冻结的参考路径比较。仅有非空或有限输出，不能证明 `numerical_equivalence=true`。
 
-`samples` contains **one global record per step**. Do not sum a repeated global value
-from every rank. `time_s` is the maximum complete-step duration across ranks.
-`model_tokens` is the actual global non-padding token count. `model_flops` is independently
-validated global useful model work. The controller checks each step's MFU and requires
-candidate tokens and model FLOPs to match the reference step by step. Local kernel
-execution FLOPs are not model FLOPs. Use actual lengths for variable-length steps;
-do not assume every step has length 4096.
+`samples` **每步只包含一条全局记录**。不要将每个 rank 重复记录的全局值相加。`time_s` 是所有 rank 中完整训练步耗时的最大值。`model_tokens` 是实际的全局非填充 token 数。`model_flops` 是经过独立验证的全局有效模型工作量。控制器逐步检查 MFU，并要求候选的 token 数和模型 FLOPs 与参考逐步一致。局部内核执行 FLOPs 不等于模型 FLOPs。变长训练步应使用实际长度，不要假定每步长度都是 4096。
 
 ```text
 Per-step MFU = model_flops / (time_s × world_size × peak_tflops_per_device × 10^12) × 100
@@ -202,60 +149,21 @@ Window throughput = sum(model_tokens) / sum(time_s)
 Throughput per device = window throughput / world_size
 ```
 
-For a performance-policy trial, set `validation_level` to the frozen level. Include
-a `model_semantics` check for the model definition, input/mask semantics, layout,
-logical Top-K, gradient reduction, and parameter update. Use
-`implementation_correctness` in screening and `numerical_equivalence` in acceptance.
-Fusion changes use `fusion_active` and `fallback_correct`. Other candidate scopes
-use `candidate_active` with proof from the corresponding runtime path.
+性能策略实验应将 `validation_level` 设为冻结的级别。提供 `model_semantics` 检查，覆盖模型定义、输入与掩码语义、布局、逻辑 Top-K、梯度归约和参数更新。筛选使用 `implementation_correctness`，验收使用 `numerical_equivalence`。融合变更使用 `fusion_active` 和 `fallback_correct`；其他候选范围使用 `candidate_active`，并附上对应运行路径的证据。
 
-The `independent_flops` check points to a JSON audit from this trial. Its metadata
-contains `trial_token`, `source_digest`, `model_config_sha256`, and `convention`
-matching `workload.flops_convention`. Its `steps` list matches the measurement
-window, with `step`, `model_tokens`, and `components` on each row. Components
-map operation classes such as routed expert GEMMs and sparse attention to
-independently derived positive useful FLOPs. The controller sums the components
-for `architecture_aware`. For `approximation`, it compares each row's
-`approximate_model_flops` with that sum and enforces the declared error limit.
-Supply the architecture derivation and shape evidence to the frozen validator.
+`independent_flops` 检查指向本轮实验的 JSON 核算报告。元数据包含 `trial_token`、`source_digest`、`model_config_sha256`，以及与 `workload.flops_convention` 一致的 `convention`。其中的 `steps` 列表与测量窗口匹配，每行包含 `step`、`model_tokens` 和 `components`。分解项将路由专家 GEMM、稀疏注意力等操作类别映射为独立推导的正数有效 FLOPs。对于 `architecture_aware`，控制器对分解项求和；对于 `approximation`，逐行将 `approximate_model_flops` 与该总和比较，并强制执行声明的误差上限。应向冻结的验证器提供架构推导和形状证据。
 
-Optional `executed_work` has `method` (`hardware_counters` or `estimate`),
-`coverage`, `evidence`, `sha256`, and `samples` containing `step` and
-`executed_flops`. Each step must belong to the unprofiled window and appear
-once. The validator checks that the counts cover the declared device set and
-configuration. The controller uses the matching unprofiled step times for HFU
-and records the sampled steps, coverage, and method. It computes
-`model_mfu_in_hfu_window_percent` over the same steps and elapsed time.
-`status` uses this matched MFU for `target_hfu_percent_at_fixed_work_ratio`
-when hardware counters are available. This field is null for estimates and
-older receipts without matched MFU.
+可选的 `executed_work` 包含 `method`（`hardware_counters` 或 `estimate`）、`coverage`、`evidence`、`sha256`，以及含 `step` 和 `executed_flops` 的 `samples`。每一步都必须属于未启用 profiler 的窗口，且只能出现一次。验证器检查计数是否覆盖声明的设备集合和配置。控制器使用匹配的未启用 profiler 的步耗时计算 HFU，并记录采样步、覆盖范围和方法。它还会在相同步骤和时间范围内计算 `model_mfu_in_hfu_window_percent`。有硬件计数器时，`status` 使用该匹配的 MFU 计算 `target_hfu_percent_at_fixed_work_ratio`。对于估算结果，以及缺少匹配 MFU 的旧凭据，该字段为 null。
 
-Optional `allocation` has `device_seconds`, `evidence`, and `sha256`. Derive
-device seconds from actual job allocations. Trial results also record wall time
-for each controller stage, including unsuccessful stages. Stage wall time
-includes any wait in the launcher.
+可选的 `allocation` 包含 `device_seconds`、`evidence` 和 `sha256`。设备秒数应根据实际作业资源分配计算。实验结果还记录控制器各阶段的墙钟耗时，包括未成功的阶段；阶段耗时包含启动器中的等待时间。
 
-## Profiling state and existing skills
+<a id="profiling-state-and-existing-skills"></a>
+## 性能分析状态与现有 Skill
 
-Run `scripts/collect_state.py --prof-dir CAPTURE --out NEW_DIRECTORY`, optionally with
-`--prior` and `--memory` JSON outputs from existing skills. The collector invokes the
-profiling `breakdown.py` directly, preserves its checks and provenance, and adds actual
-shape summaries from `kernel_details.csv`. It does not alter the profiling formulas,
-infer numbers from HTML, or invent unknown shapes and dtypes.
+运行 `scripts/collect_state.py --prof-dir CAPTURE --out NEW_DIRECTORY`，也可通过 `--prior` 和 `--memory` 提供现有 Skill 输出的 JSON。采集器直接调用 profiling 的 `breakdown.py`，保留其检查和来源信息，并从 `kernel_details.csv` 添加实际形状摘要。它不会修改性能分析公式、从 HTML 推断数值，或编造未知形状和 dtype。
 
-A `valid=false` result prevents trial promotion. Declare captured ranks and phases for
-single-device, single-node, and multi-node runs. The collector validates supplied reports;
-it does not prove global-rank coverage. The adapter must cover representative and slow
-ranks for the topology, especially PP and EP, and record that coverage in
-`timing_boundary` evidence.
+结果为 `valid=false` 时，实验不能被提升为保留结果。对单设备、单节点和多节点运行，都应声明采集的 rank 和阶段。采集器验证提供的报告，但不能证明覆盖了全部全局 rank。适配器必须覆盖该拓扑中有代表性的 rank 和慢 rank，尤其是 PP、EP，并在 `timing_boundary` 证据中记录覆盖情况。
 
-Controller-bound captures also require
-`--capture-metadata PROFILE_WORKER_METADATA.json`. The measured profile worker writes
-its actual trial token and source digest to this file, and the collector preserves them
-in `measurement_binding`. Older traces without this binding remain usable for offline
-analysis but cannot promote a new trial. The frozen validation adapter checks input and
-workload consistency between profiling and benchmarking.
+与控制器绑定的采集还要求提供 `--capture-metadata PROFILE_WORKER_METADATA.json`。被测性能采集工作进程将实际实验 token 和源码摘要写入该文件，采集器将它们保存在 `measurement_binding` 中。缺少此绑定的旧追踪仍可用于离线分析，但不能用于提升新的实验结果。冻结的验证适配器检查性能分析与基准测量之间的输入和工作负载一致性。
 
-When timing exists but shapes are missing, state retains `partial_or_unknown`.
-The planner must collect `record_shapes` or an independent shape probe before selecting
-a fused implementation.
+有计时但缺少形状时，状态保留为 `partial_or_unknown`。选择融合实现前，规划过程必须通过 `record_shapes` 或独立形状探针补齐证据。

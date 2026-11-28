@@ -1,0 +1,64 @@
+S0 调研规划
+============
+
+阶段表直接要求
+
+- 使用本 Skill 的 bringup-field-checklist.md §1～§3，以及 parallel-strategy-analyzer。
+- 产物为迁移规格，包含结构表、硬件与依赖概况、并行计划、风险清单。
+- 硬件与依赖概况使用 templates/environment-profile.md。
+- 退出条件为规格完整，每项无先例语义均已标记待上报。
+
+fun S0_调研规划(任务) {
+    清单 = READ(
+        ".agent/skills/hf-model-integration/references/bringup-field-checklist.md",
+        sections=[1, 2, 3]
+    )
+    环境模板 = READ(
+        ".agent/skills/hf-model-integration/templates/environment-profile.md"
+    )
+
+    // 以下动作展开自清单 §1～§3。
+    模型来源 = 阅读并固定模型源码和依赖版本(任务, 清单)
+    权重结构 = 推导发布权重名称和结构(模型来源, 清单)
+    语义差异 = 识别通用模块未覆盖的模型语义(模型来源, 清单)
+    硬件信息 = 只读调查硬件并记录探测来源(任务.目标环境, 清单)
+    已有权重 = 清点已有权重并核验完整性(任务.允许搜索位置, 清单)
+    依赖概况 = 调查依赖版本和覆盖需求(模型来源, 任务.目标环境, 清单)
+    结构表 = 整理模型结构表(模型来源, 权重结构, 语义差异)
+    环境概况 = 填写模板(环境模板, 硬件信息, 依赖概况)
+
+    并行计划 = SKILL(
+        "parallel-strategy-analyzer",
+        { 结构表, 环境概况, 任务.并行要求, 任务.序列长度, 任务.全局批量 }
+    )
+
+    风险清单 = 汇总风险(语义差异, 已有权重, 依赖概况, 并行计划)
+    待上报语义 = 标记无先例语义(语义差异)
+    迁移规格 = {
+        模型来源, 结构表, 环境概况, 已有权重,
+        并行计划, 风险清单, 待上报语义
+    }
+
+    缺失项 = 检查规格完整性及无先例语义标记(迁移规格)
+    return {
+        状态: if 缺失项.为空 "PASS" else "BLOCKED",
+        迁移规格, 缺失项
+    }
+}
+
+原文与实际位置
+
+- .agent/skills/hf-model-integration/SKILL.md，S0 行及 Workflow 第 1 步。
+- references/bringup-field-checklist.md §1，固定版本源码、权重目录、未覆盖语义、只读硬件调查。
+- 同一清单 §2，已有权重清点、大小校验及获取方式。
+- 同一清单 §3，依赖覆盖、平台 wheel、模态依赖和实际导入路径。
+- templates/environment-profile.md，环境概况字段和探测来源。
+- .agent/skills/parallel-strategy-analyzer/SKILL.md，依次引用 workflows/01-collect-model-info.md、02-global-baseline.md、03-strategy-search.md、04-cost-analysis.md、05-scoring-output.md。
+
+并行分析 Skill 返回基线、推荐组合、DeviceMesh 示例、分片后显存、通信、气泡、显存建议和三个备选方案。
+这些是规划估算，后续设备实验产生实测证据。
+若实际需要下载权重，主 Skill 的 Workflow 第 1 步要求先询问保存目录并获得下载授权。
+这项授权属于执行下载时的条件动作，S0 阶段表本身要求记录权重状态和风险。
+S0 的“标记待上报”与“已取得设计决定”分别记录，不能混写。
+
+

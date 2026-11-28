@@ -1,16 +1,21 @@
-# Phase 4: Comparison & Iteration
+<a id="phase-4-comparison--iteration"></a>
+# 阶段 4：比较与迭代
 
-## Objective
-Compare all validation results, identify optimal strategy, and decide on deployment or further iteration.
+<a id="objective"></a>
+## 目标
+比较全部验证结果，确定最优策略，并决定部署还是继续迭代。
 
-## Inputs
-- Baseline metrics (Phase 1)
-- All candidate results (Phase 3)
-- Target improvement goal (e.g., 1.2x)
+<a id="inputs"></a>
+## 输入
+- 阶段 1 的基线指标
+- 阶段 3 的全部候选结果
+- 目标提升倍数，例如 1.2 倍
 
-## Comparison Analysis
+<a id="comparison-analysis"></a>
+## 比较分析
 
-### 1. Aggregate Results
+<a id="1-aggregate-results"></a>
+### 1. 汇总结果
 
 ```python
 def compare_candidates(baseline, candidates):
@@ -51,7 +56,8 @@ def compare_candidates(baseline, candidates):
     return results
 ```
 
-### 2. Generate Comparison Table
+<a id="2-generate-comparison-table"></a>
+### 2. 生成比较表
 
 ```markdown
 | # | Strategy | Config | Throughput | vs Baseline | Memory | Status |
@@ -63,7 +69,8 @@ def compare_candidates(baseline, candidates):
 | 4 | Minimal TP ⭐ | TP=1,CP=1,EP=2,DP=4 | 4,274 t/s | 3.95x | 6.18 GB | ✓ BEST |
 ```
 
-### 3. Identify Winner
+<a id="3-identify-winner"></a>
+### 3. 确定胜出候选
 
 ```python
 def identify_winner(results, target_improvement=1.2):
@@ -83,9 +90,11 @@ def identify_winner(results, target_improvement=1.2):
         return None, "NO_IMPROVEMENT"
 ```
 
-## Decision Tree
+<a id="decision-tree"></a>
+## 决策树
 
-### Case 1: Target Met ✅
+<a id="case-1-target-met-"></a>
+### 情况 1：达到目标 ✅
 ```
 Winner improvement >= target (e.g., 1.2x)
 → Deploy immediately
@@ -93,7 +102,8 @@ Winner improvement >= target (e.g., 1.2x)
 → Document findings
 ```
 
-### Case 2: Improved but Below Target ⚠️
+<a id="case-2-improved-but-below-target-"></a>
+### 情况 2：有所提升但未达目标 ⚠️
 ```
 Best improvement > 1.0x but < target
 → Option A: Deploy best candidate (partial win)
@@ -103,7 +113,8 @@ Best improvement > 1.0x but < target
   - Run Phase 2-4 again (limit: 2 iterations)
 ```
 
-### Case 3: No Improvement ❌
+<a id="case-3-no-improvement-"></a>
+### 情况 3：没有提升 ❌
 ```
 All candidates failed or worse than baseline
 → Analyze failure patterns:
@@ -114,7 +125,8 @@ All candidates failed or worse than baseline
 → If ≥2 iterations: Accept baseline, report findings
 ```
 
-### Case 4: All Failed ❌
+<a id="case-4-all-failed-"></a>
+### 情况 4：全部失败 ❌
 ```
 All candidates failed (errors, not just worse)
 → Diagnose common failure:
@@ -125,7 +137,8 @@ All candidates failed (errors, not just worse)
 → Re-run Phase 2-4 (max 1 retry)
 ```
 
-## Iteration Logic
+<a id="iteration-logic"></a>
+## 迭代逻辑
 
 ```python
 def should_iterate(results, iteration_count, target_met):
@@ -153,11 +166,13 @@ def should_iterate(results, iteration_count, target_met):
     return False
 ```
 
-## Deployment Artifacts
+<a id="deployment-artifacts"></a>
+## 部署产物
 
-When winner identified, generate:
+确定胜出候选后，生成：
 
-### 1. Production Config
+<a id="1-production-config"></a>
+### 1. 生产配置
 ```yaml
 # validation_experiment/production_config.yaml
 accelerator:
@@ -176,7 +191,8 @@ fsdp_config:
   requires_grad_sync: true
 ```
 
-### 2. Migration Guide
+<a id="2-migration-guide"></a>
+### 2. 迁移指南
 ```markdown
 # Migration to Optimized Config
 
@@ -197,7 +213,8 @@ fsdp_config:
 4. Deploy to production
 ```
 
-### 3. Final Report
+<a id="3-final-report"></a>
+### 3. 最终报告
 ```markdown
 # Strategy Validation Report
 
@@ -219,9 +236,10 @@ Risk: Low
 Confidence: High (validated over 50 steps)
 ```
 
-## Example Output
+<a id="example-output"></a>
+## 输出示例
 
-From Qwen3-30B-A3B experiment:
+以下来自 Qwen3-30B-A3B 实验：
 
 ```
 ═══════════════════════════════════════════════
@@ -251,4 +269,4 @@ Files:
 
 ---
 
-**Result**: Validation complete, optimal strategy identified, ready for production deployment.
+**结果：** 验证完成，已确定最优策略，可以部署到生产。

@@ -1,0 +1,81 @@
+S4 分析与优化
+==============
+
+阶段表直接要求
+
+- 使用 profiling†、memory-analysis†、训练 RSI 协议、autoresearch†。
+- 产物为通过检查的性能基线、瓶颈清单和候选实验凭据。
+- 分别记录性能目标，预算耗尽时解释剩余差距。
+
+fun S4_分析与优化(任务, S1结果, S3结果) {
+    协议 = READ(".agent/skills/perf-playbook/references/training-rsi.md")
+    实验条件 = 固定目标工作负载测量口径和预算(任务, S1结果, S3结果, 协议)
+
+    性能基线 = SKILL("profiling", { 训练入口: S1结果, 实验条件 })
+    显存分析 = SKILL("memory-analysis", { 训练入口: S1结果, 实验条件 })
+    瓶颈清单 = 分析性能和显存证据(性能基线, 显存分析)
+
+    // 关联展开来自 training-rsi.md 和 perf-playbook。
+    if 任务.要求端到端MFU优化 { # 根据优化目标走不同的流程，感觉mfu riser应该复用autoresearch流程，不要单独存在
+        实验结果 = SKILL(
+            "mfu-riser",
+            { 实验条件, 性能基线, 显存分析, 瓶颈清单, 候选源码: S1结果 }
+        )
+    } else {
+        实验结果 = SKILL(
+            "autoresearch",
+            { 实验条件, 性能基线, 瓶颈清单, 目标文件: 任务.优化目标文件 }
+        )
+    }
+
+    目标记录 = 逐项目标记录结果及剩余差距(任务.性能目标, 实验结果)
+    缺失项 = 检查基线瓶颈凭据和目标记录完整性(性能基线, 瓶颈清单, 实验结果, 目标记录)
+    return {
+        状态: if 缺失项.为空 "PASS" else "BLOCKED",
+        性能基线, 显存分析, 瓶颈清单, 实验结果, 目标记录, 缺失项
+    }
+}
+
+S4 的 PASS 表示阶段证据和目标记录满足交接条件，实际达成情况由目标记录说明。
+mfu-riser 是通过训练 RSI 协议关联的实验入口，S4 表格直接列出的实验 Skill 是 autoresearch。
+
+关联 Skill 内部的实际调用
+
+1. profiling
+   入口为 .agent/skills/profiling/SKILL.md。
+   采集脚本为 .agent/skills/profiling/scripts/collect_prof.py。
+   分解脚本为 .agent/skills/profiling/scripts/breakdown.py。
+   Trainer 优先使用原生 profiling 配置，独立脚本可接 prof_hook.py。
+   返回原始追踪、采集完整性结果和性能分解 JSON/HTML。
+
+2. memory-analysis
+   入口为 .agent/skills/memory-analysis/SKILL.md。
+   采集脚本为 .agent/skills/memory-analysis/scripts/collect_snapshot.py。
+   挂钩为 .agent/skills/memory-analysis/scripts/mem_hook.py。
+   分解脚本为 .agent/skills/memory-analysis/scripts/breakdown.py。
+   返回快照、计数器旁车和显存分解 JSON/HTML。
+
+3. autoresearch
+   入口为 .agent/skills/autoresearch/SKILL.md。
+   控制器为 .agent/skills/autoresearch/scripts/autoresearch.py。
+   流程为 init -> baseline -> Agent 修改目标文件 -> iterate -> status -> 下一轮或结束。
+   iterate 执行提交、门禁、测量、keep/discard/crash 决策与记录。
+   discard/crash 用新的正向提交恢复目标文件，失败保留在历史中。
+   产物包括 run.json、manual.md、ideas.md、learnings.md、experiment_log.md、results.tsv、candidates.jsonl。
+
+4. mfu-riser
+   入口为 .agent/skills/mfu-riser/SKILL.md。
+   控制器为 .agent/skills/mfu-riser/scripts/mfu_riser.py。
+   Agent 准备 run.json、plan.json，控制器执行 init、trial、status、report。
+   每轮 trial 分为 precheck -> benchmark -> profile -> validate -> cleanup。
+   Agent 根据结果继续提出方案，筛选达标后进入验收序列并独立 confirm。
+   产物包括 controller.json、history.jsonl、各 trial 的源码快照、阶段日志、measurement.json、result.json、REPORT.md。
+
+5. 经验沉淀
+   两个控制器共用 .agent/scripts/rsi_learning.py。
+   默认 acceptance 在验收时整理，continuous 在完成实验并清理后整理。
+   Agent 复盘全部结果并填写 rsi/review.json，learn/finalize 调用共享工具检查证据和应用修改。
+   产物包括 RSI_REPORT.md、RSI_REPORT.html、rsi/report.json 和 .agent/learning/registry.json 的合格更新。
+   详细约定见 .agent/skills/autoresearch/references/experience-consolidation.md。
+
+

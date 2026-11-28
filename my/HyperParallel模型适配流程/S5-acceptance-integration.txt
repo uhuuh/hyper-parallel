@@ -1,0 +1,85 @@
+S5 验收集成
+============
+
+阶段表直接要求
+
+- 使用 precision-acceptance 规则†、code-review。
+- autogit 和 gate-doctor 在提交操作获得授权后使用。
+- 产物为验收运行、报告、保存/恢复/续训记录，以及保留在本地的可审阅变更集。
+- 变更集包含提交、差异、单测与门禁证据摘要。
+- 退出条件为验收证据完整、修改可审阅、交付清单满足，并记录 held/authorized/submitted 状态。
+- 创建、更新或重触发 PR 是需要明确授权的独立步骤。
+
+fun S5_验收集成(任务, S0结果, S1结果, S3结果, S4结果) {
+    精度规则 = READ(".agent/rules/precision-acceptance.md")
+    交付清单 = READ(
+        ".agent/skills/hf-model-integration/references/migration-deliverables.md"
+    )
+    报告模板 = READ(
+        ".agent/skills/hf-model-integration/templates/migration-report.md"
+    )
+
+    待验收版本 = 确认最终候选源码配置与证据版本(S1结果, S4结果)
+    验收窗口 = 按模型规模及已确定标准选择窗口(S0结果.迁移规格, 精度规则)
+    验收结果 = 运行验收并记录步耗时显存及Loss(待验收版本, 验收窗口)
+    恢复记录 = 验证保存恢复与连续训练轨迹(待验收版本, 验收结果)
+    // 主 Skill 允许记录有依据的 checkpoint 范围外决定，需显式说明原因。
+
+    审查结果 = SKILL(
+        "code-review",
+        { 待验收版本, 验收结果, 恢复记录, 分布式证据: S3结果 }
+    )
+    迁移报告 = 填写模板(报告模板, S0结果, S1结果, S3结果, S4结果, 验收结果, 恢复记录)
+    经验复盘 = 复盘运行台账并追踪通用经验的责任资产(S0结果, S1结果, S3结果, S4结果, 验收结果)
+
+    RSI报告 = None
+    提交结果 = None
+    门禁记录 = None
+    if S4结果.实验结果.使用RSI控制器 {
+        经验审阅 = 编写或更新RSI审阅文件(经验复盘, S4结果.实验结果.全部实验凭据)
+        RSI报告 = 执行所属控制器Finalize(S4结果.实验结果, 经验审阅)
+    }
+
+    交付检查 = 检查实际交付物(交付清单, 待验收版本, 迁移报告, 恢复记录)
+    提交状态 = 记录当前授权与提交状态(任务, 待验收版本)
+
+    if 任务.已授权相应提交操作 {
+        提交结果 = SKILL("autogit", { 待验收版本, 审查结果, 交付检查, 授权范围: 任务.授权范围 })
+        if 提交结果.需要门禁处理 {
+            门禁记录 = SKILL("gate-doctor", { 提交结果, 授权范围: 任务.授权范围 })
+        }
+        提交状态 = 根据实际操作更新提交状态(提交状态, 提交结果)
+    }
+
+    缺失项 = 检查验收及交付证据完整性(
+        验收结果, 恢复记录, 审查结果, 交付检查, 经验复盘
+    )
+    if RSI报告 != None && !RSI报告.complete {
+        缺失项.append("RSI 经验复盘或回写尚未完成")
+    }
+
+    return {
+        状态: if 缺失项.为空 "PASS" else "BLOCKED",
+        待验收版本, 验收结果, 恢复记录, 迁移报告, 经验复盘, RSI报告, 提交状态,
+        提交结果, 门禁记录, 缺失项,
+        可审阅变更集: 汇总提交差异及测试证据(待验收版本)
+    }
+}
+
+S5 的相关约束和实际入口
+
+- 主 Skill 的 Acceptance、Save/restore/resume、Run ledger 等正文展开验收要求。
+- 按模型规模选择窗口，约 10B 以下为 1000 步，10B～100B 为 200 步，100B～1T 为 50 步，1T 及以上为 10 步。
+- 这些窗口对应不同强度的统计结论，报告需声明实际窗口、异常和限制。
+- .agent/rules/precision-acceptance.md 规定轨迹误差、grad_norm、首步、确定性和恢复检查，正文说明与规模窗口的关系。
+- .agent/examples/hf_text_bringup/reproduce/reproduce.sh 的 stage_s5() 复现已有模型的长运行。
+- 长运行与实际保存/恢复/续训分别保留结果，检查点路径通过实际训练配置和启动器执行。
+- python -m hyper_parallel.tools.model_integration report --output-dir ... 汇总其支持路线的结构化证据，生成 summary.md、summary.zh-CN.md。
+- .agent/skills/feature-doc/SKILL.md 可组织或更新设计文档，其模板为 templates/feature-design-doc.md。
+- .agent/skills/hf-model-integration/templates/migration-report.md 是迁移报告模板。
+- .agent/skills/hf-model-integration/templates/run-metrics.md 按每次运行填写一列，记录操作者决策、恢复闭环、门禁首次通过、设备时间和经验沉淀。
+- .agent/skills/hf-model-integration/scripts/check_asset_links.py 检查资产链接。
+- .agent/skills/autogit/SKILL.md、.agent/skills/gate-doctor/SKILL.md 分别说明提交和门禁流程。
+- 未执行的条件步骤以 None 记录，报告注明原因和适用范围。
+
+

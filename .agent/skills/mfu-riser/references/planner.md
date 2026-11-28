@@ -1,51 +1,23 @@
-# Planning a testable training optimization
+<a id="planning-a-testable-training-optimization"></a>
+# 规划可检验的训练优化
 
-Inputs include the current best trial, parallel-strategy analysis (PSA) prior, profiling
-state, runtime environment and operator shapes, perf-playbook references, failure history,
-and remaining budget. Retain only a few candidates with explicit mechanisms per iteration
-and select one for execution.
+输入包括当前最佳实验、并行策略分析（PSA）先验、性能分析状态、运行环境和算子形状、perf-playbook 参考资料、失败历史及剩余预算。每轮只保留少量机制明确的候选，并选择一个执行。
 
-## Decision process
+<a id="decision-process"></a>
+## 决策流程
 
-1. Verify the MFU audit and runtime evidence, then inspect compute, exposed communication,
-   and device idle (`Free`) time on the slowest ranks. Use complete steps including the
-   optimizer. Keep overlapping intervals distinct when sizing the critical path.
-2. Follow compute hotspots to actual operators and source call sites. Distinguish
-   inefficient large GEMMs, dense sequences of small operators, memory transfers, Host
-   dispatch, and CPU fallback. An AI_CPU HCCL launch kernel is communication, not operator
-   fallback.
-3. Look for a comparable implementation in HyperParallel, then check the installed
-   framework and CANN operator family, including paged and backward entry points.
-   Use public NVIDIA implementations of the same model as design references when useful.
-   Verify dtype, layout, real shapes, mask/epsilon/scale semantics, device, CANN/PTA
-   versions, and training support in the target runtime.
-4. Form a falsifiable hypothesis, list alternative explanations, and select an inexpensive
-   diagnostic. Capture missing shapes instead of substituting model hidden size. Locate
-   a source call site for every proposed fusion chain.
-5. Estimate time saved on the critical path, then assess implementation cost and uncertainty.
-   Kernel durations summed across streams cannot be converted directly to step-time shares.
-   If the critical-path share is unknown, label the expected gain as unknown and schedule
-   a probe. For a large MFU gap, consider equivalent module/kernel replacements, fusion,
-   collective scheduling, parallel layout, and activation lifetime changes. A proposed
-   optimization should remove enough exposed time to justify its cost.
-6. Compare numerics and microbenchmarks across actual shapes, layouts, dtypes, tail blocks,
-   and empty experts before measuring complete training. Check whether a path is already
-   fused to avoid substituting the same underlying kernel.
+1. 核查 MFU 核算和运行证据，再查看最慢 rank 上的计算、未被计算掩盖的通信和设备空闲（`Free`）时间。使用包含优化器的完整训练步。估算关键路径时，应区分相互重叠的时间区间。
+2. 从计算热点追踪到实际算子和源码调用点。区分低效的大 GEMM、密集的小算子序列、内存传输、Host 调度和 CPU 回退。AI_CPU 上的 HCCL 启动内核属于通信，不是算子回退。
+3. 先查找 HyperParallel 中可比的实现，再检查已安装框架和 CANN 算子族，包括分页及反向入口。必要时可参考同一模型公开的 NVIDIA 实现。核对目标运行时中的 dtype、布局、实际形状、掩码/epsilon/缩放语义、设备、CANN/PTA 版本和训练支持。
+4. 提出可证伪的假设，列出其他可能解释，并选择成本较低的诊断方法。缺少形状时应采集，而不是用模型隐藏维度代替。为每条拟议的融合链定位源码调用点。
+5. 估算关键路径上可节省的时间，再评估实现成本和不确定性。不能把跨流累加的内核耗时直接换算成训练步耗时占比。关键路径占比未知时，应将预期收益标为未知，并安排探针。MFU 差距较大时，考虑等价模块/内核替换、融合、集合通信调度、并行布局和激活生命周期变更。拟议优化应能消除足够多的未被掩盖耗时，以证明其成本合理。
+6. 在测量完整训练之前，针对实际形状、布局、dtype、尾块和空专家进行数值比较及微基准测量。检查路径是否已经融合，避免替换后仍调用相同的底层内核。
 
-When evidence contains a runtime failure or material performance defect, include its
-original workload and closure criteria in the proposal. Follow the
-[repair procedure](../../perf-playbook/references/failure-repair.md) before treating
-a fallback or a smaller input as a valid replacement. Keep asynchronous failure
-localization and diagnostic synchronization separate from performance measurement.
+证据中存在运行故障或重大性能缺陷时，应在方案中写明原始工作负载和问题关闭标准。将回退或缩小输入视为有效替代方案之前，先遵循[修复流程](../../perf-playbook/references/failure-repair.md)。异步故障定位和诊断性同步应与性能测量分开。
 
-For Muon workloads, inspect the HyperParallel path already in use before proposing an
-optimizer change. Profile Gram and Newton–Schulz GEMMs, batch/group execution, momentum
-updates, and state transfer. Equivalent replacements preserve the declared update rule
-and are checked with the actual shapes and distributed state layout.
+对 Muon 工作负载，在提出优化器变更前，先检查当前使用的 HyperParallel 路径。分析 Gram 和 Newton–Schulz GEMM、批量/分组执行、动量更新和状态传输。等价替换必须保留声明的更新规则，并使用实际形状和分布式状态布局验证。
 
-A useful ranking heuristic is expected end-to-end time saving × evidence confidence /
-implementation and validation cost. Do not report uncalibrated success probabilities or
-use a documentation microbenchmark as the predicted gain for the current workload.
+一种有用的排序启发式是：预期端到端节省时间 × 证据可信度 / 实现与验证成本。不要报告未经校准的成功概率，也不要将文档中的微基准结果当作当前工作负载的预期收益。
 
 ```text
 Speedup bound for one region = 1 / (1 - fraction + fraction / local_speedup)
@@ -55,49 +27,26 @@ Target step budget = baseline_step_time * baseline_mfu / target_mfu
 Required savings = baseline_step_time - target_step_budget
 ```
 
-Inventory the removable intervals on the slow ranks from a separate profile.
-Use the union of exposed intervals when several changes affect the same path.
-If the entire eligible region is smaller than the required savings, broaden the
-candidate scope. Align timing boundaries and revisit the trace after a material
-gain. Apply this calculation within a fixed workload series.
+通过独立的性能采集，盘点慢 rank 上可消除的时间区间。多项变更影响同一路径时，应使用未被掩盖区间的并集。如果整个可优化区域仍小于所需节省时间，应扩大候选范围。对齐计时边界，并在取得明显收益后重新查看追踪。上述计算应在工作负载固定的同一序列内使用。
 
-`status` returns `target_step_budget_seconds` and `required_step_savings_seconds`
-from the current best unprofiled window. Both fields are null before a valid trial.
-This focuses subsequent planning at any utilization level, with the run's selected
-MFU convention and device peak. At fixed work, reaching 35% from 30% requires
-reducing the complete step time by about 14.3%.
+`status` 根据当前最佳结果中未启用 profiler 的窗口返回 `target_step_budget_seconds` 和 `required_step_savings_seconds`。在获得有效实验之前，两个字段均为 null。这些值结合本轮选定的 MFU 口径和设备峰值，为不同利用率下的后续规划确定重点。工作量固定时，从 30% 提升到 35% 需要将完整训练步耗时缩短约 14.3%。
 
-With hardware counters, `status` also projects the covered HFU required at the
-target MFU, assuming executed FLOPs per useful FLOP stay constant. Use HFU and MFU
-from the same sampled steps for this ratio. Compare the projection with observed
-device efficiency under that counter coverage. A large gap makes it useful to
-measure and reduce extra execution, such as activation replay or excess attention
-arithmetic, alongside efforts to remove idle time. Interpret this as a planning
-estimate under a fixed ratio. Candidate acceptance still uses measured results.
+有硬件计数器时，`status` 还会假设每单位有效 FLOP 对应的执行 FLOPs 保持不变，推算达到目标 MFU 所需的、计数器覆盖范围内的 HFU。该比值必须使用相同采样步骤的 HFU 和 MFU。将推算值与相同计数覆盖范围内观测到的设备效率比较。差距较大时，除了减少空闲时间，也应测量并减少激活重放、额外注意力计算等执行工作。这只是固定比值假设下的规划估算；候选验收仍以实测结果为准。
 
-Use the size of the deficit to choose the next experiment.
+根据差距大小选择下一项实验。
 
-| Trace and workload evidence | Next experiment |
+| 追踪与工作负载证据 | 下一项实验 |
 | --- | --- |
-| Exposed communication and idle alone cannot cover the deficit on the critical path | Inspect the compute and memory path at the slow ranks. Check for avoidable mask or intermediate materialization, backend dispatch, and rematerialized work. |
-| Recompute is material and the measured peak has headroom | Test selective activation retention. Rank by unprofiled seconds saved per extra GiB and verify the combined peak. |
-| Large covered kernels already approach a shape-matched compute ceiling | Measure avoidable work and memory traffic, then bound the gain of a kernel rewrite before committing to it. |
-| The task permits workload changes and update-level fixed costs are material | Estimate accumulation scaling in a linked capacity series. Check effective throughput, memory, and numerical equivalence within each selected workload. |
+| 仅消除未被掩盖的通信和空闲仍无法补足关键路径上的差距 | 检查慢 rank 的计算和内存路径，查找可避免的掩码或中间张量物化、后端分派，以及重新物化的工作。 |
+| 重计算开销明显，且实测峰值仍有余量 | 测试选择性保留激活。按每增加 GiB 能节省的无 profiler 耗时排序，并验证组合后的峰值。 |
+| 已覆盖的大内核接近相同形状下的计算上限 | 测量可避免的工作量和内存流量，在投入内核重写前估算其收益上界。 |
+| 任务允许修改工作负载，且每次更新的固定成本明显 | 在关联容量序列中估算梯度累积的缩放收益；在每个选定工作负载内检查有效吞吐、显存和数值等价性。 |
 
-Use diagnostic traces to rank regions. A single-rank or perturbed capture provides
-a bound only for its observed scope. After a material gain, capture the new critical
-path and recompute the remaining deficit before ranking another expensive candidate.
+使用诊断追踪对区域排序。单 rank 或受采集扰动的追踪，只能约束其观测范围内的判断。取得明显收益后，应重新采集关键路径并计算剩余差距，再为下一项高成本候选排序。
 
-When global batch is tunable, hold the microbatch shape, topology and model
-fixed. Use measured one- and two-microbatch step times to fit an intercept
-and a marginal microbatch cost. Use this estimate to rank the next capacity
-probe. Verify the prediction with a real run. The intercept groups fixed
-costs and does not isolate the optimizer. Check persistent gradient memory,
-complete-step MFU, effective throughput and matched token normalization.
-Give every global batch its own baseline and acceptance series.
+全局批量可调时，固定微批形状、拓扑和模型。使用一微批、两微批的实测单步时间，拟合固定截距和每增加一个微批的边际成本，并据此为下一次容量探测排序。用实际运行检验预测。截距汇总多种固定成本，不能单独归因于优化器。检查常驻梯度显存、完整训练步 MFU、有效吞吐，以及一致的 token 归一化口径。每个全局批量都应建立自己的基线和验收序列。
 
-Use the [accumulation planning command](../scripts/plan_accumulation.py) with
-completed trial directories from one and two microbatch configurations:
+使用[梯度累积规划命令](../scripts/plan_accumulation.py)，输入一微批和两微批配置下已完成实验的目录：
 
 ```bash
 python .agent/skills/mfu-riser/scripts/plan_accumulation.py \
@@ -105,59 +54,29 @@ python .agent/skills/mfu-riser/scripts/plan_accumulation.py \
   --probe 6 --target-mfu-percent 35 --max-relative-time-error 0.01
 ```
 
-Keep sequence length, per-replica microbatch size, model source, topology, effective
-token and FLOP work, and unprofiled measurement window fixed. Pass the accumulation
-and global batch settings through the declared workload fields so the model source
-manifest can match. Treat a two-point forecast as an experiment hypothesis. Add an
-independent count, such as four, to check prediction error before a larger probe.
-Set the error budget from comparable A/A timings before examining the replay.
-After a failed check, inspect which costs changed with accumulation before fitting again.
+保持序列长度、每副本微批大小、模型源码、拓扑、有效 token 与 FLOP 工作量，以及未启用 profiler 的测量窗口固定。通过声明的工作负载字段传递梯度累积和全局批量设置，使模型源码清单可以保持一致。将两点拟合的预测视为实验假设。安排更大规模探测前，增加一个独立的微批数量（例如四微批），检查预测误差。在查看重跑结果之前，根据可比的 A/A 计时设定误差预算。检查失败后，先调查哪些成本随累积次数改变，再重新拟合。
 
-The modeled MFU limit extrapolates this fit with unchanged per-microbatch work.
-Use it to judge whether batch scaling alone could close the target gap. The tool
-does not estimate peak memory. Before each probe, check resident gradients,
-activation lifetimes, allocation peaks, and the workload's approved batch range.
-Use same-batch numerical controls and independent, complete unprofiled validation
-for the configuration selected for acceptance.
+模型化的 MFU 极限是在每微批工作量不变的假设下外推该拟合结果，用于判断单靠批量缩放能否补足目标差距。工具不估算峰值显存。每次探测前，检查常驻梯度、激活生命周期、分配峰值和获准的批量范围。对最终选定用于验收的配置，应提供相同批量下的数值对照，并独立执行完整的无 profiler 验证。
 
-## Required proposal fields
+<a id="required-proposal-fields"></a>
+## 方案必需字段
 
-Choose the diagnostic level using
-[hierarchical performance diagnosis](../../perf-playbook/references/hierarchical-performance-diagnosis.md).
-Resolve major framework, pipeline, existing-module/kernel, and overlap opportunities
-before a broad hardware-efficiency investigation. Record why the current workload
-has reached a plateau before escalating to CUBE, HBM, and link counters; low gains
-from a few already-hidden collectives are not sufficient evidence. A targeted
-counter capture can still be used earlier when it directly resolves the leading
-bottleneck hypothesis. This is Agent planning guidance, not an automatic MFU gate.
+按照[分层性能诊断](../../perf-playbook/references/hierarchical-performance-diagnosis.md)选择诊断层级。在全面调查硬件效率前，先处理框架、流水线、现有模块/内核和重叠执行中的主要优化机会。升级到 CUBE、HBM 和链路计数器分析前，应记录当前工作负载为何已经达到平台期；仅在几个本已被掩盖的集合通信上收益较低，不足以支持这一结论。如果定向计数器采集能直接解决当前最主要的瓶颈假设，也可以提前使用。这是对 Agent 的规划指导，不是自动 MFU 门禁。
 
-Provide `observation` with rank, step, operator, and source; `mechanism`;
-`expected_effect` with a range and justification, or an explanation of missing evidence;
-`falsifier`; `compatibility` with verified and pending constraints; `actions`;
-`evidence` file paths; and local `knowledge` file paths.
+提供包含 rank、步、算子和源码信息的 `observation`；`mechanism`；包含范围及依据的 `expected_effect`，或缺少证据的说明；`falsifier`；列出已验证和待验证约束的 `compatibility`；`actions`；`evidence` 文件路径；以及本地 `knowledge` 文件路径。
 
-Choose `operator_scope` from the [candidate contract](contracts.md#planjson).
-Use the measured path and expected end-to-end effect to choose an experiment.
+从[候选协议](contracts.md#planjson)选择 `operator_scope`。根据实测路径和预期端到端效果选择实验。
 
-`actions` may contain dependent changes. Explain dependencies and conflicts.
-Measure independent changes separately, then perform ablations on successful combinations
-within the budget. Without ablations, report only the combined benefit and do not assign
-individual contributions. The playbook's one-technique default means one testable
-hypothesis or necessary combination here, consistent with authorized combination search.
+`actions` 可以包含相互依赖的变更。说明依赖和冲突。先分别测量独立变更，再在预算内对成功的组合进行消融实验。没有消融证据时，只报告组合收益，不分配单项贡献。手册默认的“一次一种技术”在这里指一个可检验假设或必要组合，与经过授权的组合搜索一致。
 
-## Engagement and learning
+<a id="engagement-and-learning"></a>
+## 路径生效与经验学习
 
-- Check positive engagement markers, invocation counts, shape coverage, and trace kernels
-  for each supported shape, rather than checking only the switch value.
-- Compare forward, backward, recomputation, and optimizer phases to detect shifted costs.
-- Keep repeatable slow steps in the measured window and correlate them with the trace.
-- Report local gains when end-to-end performance does not improve. Kernel speedup alone
-  does not justify `keep`.
-- Classify negative results as non-engagement, incompatibility, numerical failure,
-  bottleneck migration, noise, or a genuine lack of benefit.
-- Update the current explanation, its evidence, and remaining unknowns each iteration
-  instead of accumulating configuration switches.
+- 对每种支持的形状，检查正向生效标记、调用次数、形状覆盖和追踪中的内核，不能只看开关值。
+- 比较前向、反向、重计算和优化器各阶段，识别成本是否转移。
+- 将可重复出现的慢步保留在测量窗口中，并与追踪关联分析。
+- 端到端性能未改善时，应将收益报告为局部收益。仅有内核加速不足以判为 `keep`。
+- 将负面结果分类为路径未生效、不兼容、数值失败、瓶颈迁移、噪声或确实无收益。
+- 每轮更新当前解释、证据和剩余未知项，不要只不断增加配置开关。
 
-When adding a perf-playbook case, record the triggering symptom, runtime versions and
-shapes, source hashes, intervention, numerical and engagement evidence, complete-step
-gain, applicability limits, and the condition for retrying a deferred candidate.
+添加 perf-playbook 案例时，记录触发症状、运行时版本和形状、源码哈希、改动、数值与路径生效证据、完整训练步收益、适用限制，以及暂缓候选的重试条件。

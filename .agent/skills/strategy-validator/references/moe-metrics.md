@@ -1,26 +1,30 @@
-# MoE-Specific Metrics for Strategy Validation
+<a id="moe-specific-metrics-for-strategy-validation"></a>
+# MoE-Specific Metrics for Strategy Validation（策略验证的 MoE 专用指标）
 
-**Extension to standard validation metrics** for Mixture-of-Experts models.
+对混合专家模型**标准验证指标的扩展**。
 
-Load this reference when validating MoE model training strategies.
-
----
-
-## Overview
-
-Standard validation metrics (throughput, memory, MFU) are insufficient for MoE models. Additional MoE-specific metrics are required to diagnose:
-- Expert load imbalance
-- All-to-All communication overhead
-- Routing efficiency
-- Straggler issues
+验证 MoE 模型训练策略时加载本参考文档。
 
 ---
 
-## Metric Collection Points
+<a id="overview"></a>
+## 概述
 
-### 1. During Training Loop
+标准验证指标，如吞吐、显存和 MFU，不足以分析 MoE 模型。需要额外的 MoE 专用指标来诊断：
+- 专家负载不均衡
+- All-to-All 通信开销
+- 路由效率
+- 慢 rank 问题
 
-Insert hooks into MoE modules to capture per-step metrics:
+---
+
+<a id="metric-collection-points"></a>
+## 指标采集位置
+
+<a id="1-during-training-loop"></a>
+### 1. 训练循环中
+
+在 MoE 模块中插入 hook，采集逐步指标：
 
 ```python
 from hyper_parallel.core.expert_parallel import MoE
@@ -63,9 +67,10 @@ def setup_moe_hooks(model):
     return moe_metrics
 ```
 
-### 2. During All-to-All Communication
+<a id="2-during-all-to-all-communication"></a>
+### 2. All-to-All 通信期间
 
-Measure communication overhead:
+测量通信开销：
 
 ```python
 import torch.distributed as dist
@@ -108,11 +113,13 @@ def measure_alltoall_overhead(moe_module, step_start_time):
 
 ---
 
-## Metric Definitions
+<a id="metric-definitions"></a>
+## Metric Definitions（指标定义）
 
-### 1. Expert Load Imbalance
+<a id="1-expert-load-imbalance"></a>
+### 1. 专家负载不均衡
 
-**expert_load_std**: Coefficient of variation of expert loads
+**expert_load_std：** 专家负载的变异系数。
 
 ```python
 def compute_load_std(tokens_per_expert):
@@ -131,7 +138,7 @@ def compute_load_std(tokens_per_expert):
 # CV > 0.30: Severe imbalance
 ```
 
-**load_imbalance_factor**: Max load / average load
+**load_imbalance_factor：** 最大负载与平均负载之比。
 
 ```python
 def compute_load_imbalance_factor(tokens_per_expert):
@@ -152,9 +159,10 @@ def compute_load_imbalance_factor(tokens_per_expert):
 
 ---
 
-### 2. All-to-All Communication Overhead
+<a id="2-all-to-all-communication-overhead"></a>
+### 2. All-to-All 通信开销
 
-**alltoall_overhead_ratio**: Fraction of step time spent in All-to-All
+**alltoall_overhead_ratio：** All-to-All 耗时占训练步耗时的比例。
 
 ```python
 def compute_alltoall_overhead(alltoall_times, total_step_time):
@@ -171,7 +179,7 @@ def compute_alltoall_overhead(alltoall_times, total_step_time):
 # > 0.50: Critical overhead
 ```
 
-**alltoall_efficiency**: Effective bandwidth / theoretical bandwidth
+**alltoall_efficiency：** 有效带宽与理论带宽之比。
 
 ```python
 def compute_alltoall_efficiency(message_size_bytes, time_ms, theoretical_bw_gbps):
@@ -193,9 +201,10 @@ def compute_alltoall_efficiency(message_size_bytes, time_ms, theoretical_bw_gbps
 
 ---
 
-### 3. Routing Efficiency
+<a id="3-routing-efficiency"></a>
+### 3. 路由效率
 
-**routing_entropy**: Entropy of expert utilization distribution
+**routing_entropy：** 专家利用率分布的熵。
 
 ```python
 def compute_routing_entropy(expert_probabilities):
@@ -222,7 +231,7 @@ def compute_routing_entropy(expert_probabilities):
 # < 0.5: Severe skew (many dead experts)
 ```
 
-**expert_coverage**: Fraction of experts activated
+**expert_coverage：** 被激活专家的比例。
 
 ```python
 def compute_expert_coverage(tokens_per_expert):
@@ -243,9 +252,10 @@ def compute_expert_coverage(tokens_per_expert):
 
 ---
 
-### 4. Straggler Detection
+<a id="4-straggler-detection"></a>
+### 4. 慢 rank 检测
 
-**straggler_factor**: Max rank time / average rank time
+**straggler_factor：** 最大 rank 耗时与平均 rank 耗时之比。
 
 ```python
 def compute_straggler_factor(rank_times):
@@ -264,7 +274,7 @@ def compute_straggler_factor(rank_times):
 # > 1.5: Severe stragglers
 ```
 
-**rank_time_cv**: Coefficient of variation of rank times
+**rank_time_cv：** 各 rank 耗时的变异系数。
 
 ```python
 def compute_rank_time_cv(rank_times):
@@ -285,9 +295,10 @@ def compute_rank_time_cv(rank_times):
 
 ---
 
-### 5. Dropped Tokens
+<a id="5-dropped-tokens"></a>
+### 5. 丢弃的 token
 
-**dropped_token_ratio**: Fraction of tokens dropped due to capacity
+**dropped_token_ratio：** 因容量限制而丢弃的 token 比例。
 
 ```python
 def compute_dropped_token_ratio(dropped_tokens, total_tokens):
@@ -305,9 +316,10 @@ def compute_dropped_token_ratio(dropped_tokens, total_tokens):
 
 ---
 
-## Aggregated MoE Metrics
+<a id="aggregated-moe-metrics"></a>
+## 汇总 MoE 指标
 
-Combine per-step metrics into validation summary:
+将逐步指标合并到验证摘要：
 
 ```python
 def aggregate_moe_metrics(moe_metrics_per_step):
@@ -359,9 +371,10 @@ def aggregate_moe_metrics(moe_metrics_per_step):
 
 ---
 
-## Output Format for Validation Report
+<a id="output-format-for-validation-report"></a>
+## 验证报告输出格式
 
-Extend standard validation report with MoE section:
+为标准验证报告增加 MoE 部分：
 
 ```json
 {
@@ -411,9 +424,10 @@ Extend standard validation report with MoE section:
 
 ---
 
-## Integration with strategy-validator
+<a id="integration-with-strategy-validator"></a>
+## 与 strategy-validator 集成
 
-Update validation workflow to collect MoE metrics:
+更新验证流程，采集 MoE 指标：
 
 ```python
 # In validation script
@@ -438,24 +452,27 @@ if model_config.get("is_moe", False):
 
 ---
 
-## Thresholds for Pass/Fail
+<a id="thresholds-for-passfail"></a>
+## 通过与失败阈值
 
-Define acceptable ranges for MoE metrics:
+为 MoE 指标定义可接受范围：
 
-| Metric | Good | Acceptable | Poor |
+| 指标 | 良好 | 可接受 | 较差 |
 |--------|------|------------|------|
-| Load imbalance factor | < 1.3 | 1.3 - 1.8 | > 1.8 |
-| AllToAll ratio | < 0.20 | 0.20 - 0.35 | > 0.35 |
-| Routing entropy | > 0.85 | 0.70 - 0.85 | < 0.70 |
-| Expert coverage | > 0.95 | 0.85 - 0.95 | < 0.85 |
-| Dropped token ratio | < 0.01 | 0.01 - 0.05 | > 0.05 |
-| Straggler factor | < 1.15 | 1.15 - 1.30 | > 1.30 |
+| 负载不均衡因子 | < 1.3 | 1.3 - 1.8 | > 1.8 |
+| AllToAll 占比 | < 0.20 | 0.20 - 0.35 | > 0.35 |
+| 路由熵 | > 0.85 | 0.70 - 0.85 | < 0.70 |
+| 专家覆盖率 | > 0.95 | 0.85 - 0.95 | < 0.85 |
+| token 丢弃比例 | < 0.01 | 0.01 - 0.05 | > 0.05 |
+| 慢 rank 因子 | < 1.15 | 1.15 - 1.30 | > 1.30 |
 
 ---
 
-## Example Diagnosis
+<a id="example-diagnosis"></a>
+## 诊断示例
 
-### Scenario A: High Communication Overhead
+<a id="scenario-a-high-communication-overhead"></a>
+### 场景 A：通信开销高
 
 ```json
 {
@@ -467,7 +484,8 @@ Define acceptable ranges for MoE metrics:
 }
 ```
 
-### Scenario B: Load Imbalance
+<a id="scenario-b-load-imbalance"></a>
+### 场景 B：负载不均衡
 
 ```json
 {
@@ -479,7 +497,8 @@ Define acceptable ranges for MoE metrics:
 }
 ```
 
-### Scenario C: Dead Experts
+<a id="scenario-c-dead-experts"></a>
+### 场景 C：未激活的专家
 
 ```json
 {
@@ -493,7 +512,8 @@ Define acceptable ranges for MoE metrics:
 
 ---
 
-## References
+<a id="references"></a>
+## 参考资料
 
-- [moe-profiler/references/moe-metrics.md](../../moe-profiler/references/moe-metrics.md) — Metric definitions
-- [parallel-strategy-analyzer/references/moe-strategy-rules.md](../../parallel-strategy-analyzer/references/moe-strategy-rules.md) — Strategy rules
+- [moe-profiler/references/moe-metrics.md](../../moe-profiler/references/moe-metrics.md)：指标定义
+- [parallel-strategy-analyzer/references/moe-strategy-rules.md](../../parallel-strategy-analyzer/references/moe-strategy-rules.md)：策略规则

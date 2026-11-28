@@ -1,12 +1,9 @@
-# Autoresearch accumulated findings
+<a id="autoresearch-accumulated-findings"></a>
+# Autoresearch 累积经验
 
-The Agent maintains findings across experiments. Read this file at each iteration and
-update it after unexpected positive or negative results. Put individual experiment
-details in `experiment_log.md`; retain actionable conclusions here. Seed findings
-originate from measured manual experiments on 2026-09-23/24.
+Agent 跨实验维护这些发现。每轮开始时阅读本文件，出现意外的正面或负面结果后及时更新。单次实验细节放在 `experiment_log.md`，这里保留可指导后续行动的结论。初始经验来自 2026-09-23/24 的人工实测实验。
 
-## Methodology
+<a id="methodology"></a>
+## 记录方法
 
-Record the triggering symptom, runtime and tensor shapes, change mechanism,
-correctness and engagement evidence, end-to-end result, applicability limits,
-and conditions that would justify a retry. Link the experiment and raw evidence.
+记录触发症状、运行环境和张量形状、修改机制、正确性与路径生效证据、端到端结果、适用限制，以及足以支持重试的条件。链接对应实验和原始证据。

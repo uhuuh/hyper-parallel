@@ -1,25 +1,29 @@
-# Phase 3: Metrics Extraction
+<a id="phase-3-metrics-extraction"></a>
+# 阶段 3：指标提取
 
-Parse training logs and profiler traces to extract standardized performance metrics.
+解析训练日志和性能追踪，提取标准化性能指标。
 
-## 3.1 Primary Metrics
+<a id="31-primary-metrics"></a>
+## 3.1 主要指标
 
-Target metrics matching PSA estimates:
+提取与 PSA 估算对应的目标指标：
 
-| Metric | Unit | Source | Priority |
+| 指标 | 单位 | 来源 | 优先级 |
 |--------|------|--------|----------|
-| **Throughput** | tokens/s, samples/s | Training log | P0 |
-| **Memory peak** | GB per device | Training log + profiler | P0 |
-| **MFU** | % | Computed from FLOPs + time | P0 |
-| **Bubble ratio** | % (PP only) | Profiler trace | P1 |
-| **Step time** | ms | Training log | P1 |
-| **Communication time** | ms | Profiler trace | P2 |
+| **吞吐** | tokens/s、samples/s | 训练日志 | P0 |
+| **显存峰值** | 每设备 GB | 训练日志和 profiler | P0 |
+| **MFU** | % | 根据 FLOPs 和时间计算 | P0 |
+| **气泡比例** | %，仅限 PP | 性能追踪 | P1 |
+| **步耗时** | ms | 训练日志 | P1 |
+| **通信耗时** | ms | 性能追踪 | P2 |
 
-## 3.2 Log Parsing
+<a id="32-log-parsing"></a>
+## 3.2 日志解析
 
-### 3.2.1 Extract Throughput
+<a id="321-extract-throughput"></a>
+### 3.2.1 提取吞吐
 
-Target log lines (after warmup, steps 11-50):
+目标日志行，取预热后的第 11～50 步：
 
 ```
 [Step 11/50] loss=2.298, throughput=28.5 samples/s, tokens/s=116K, step_time=1.23s
@@ -28,7 +32,7 @@ Target log lines (after warmup, steps 11-50):
 [Step 50/50] loss=2.103, throughput=29.2 samples/s, tokens/s=119K, step_time=1.19s
 ```
 
-**Extraction script:**
+**提取脚本：**
 
 ```python
 import re
@@ -87,16 +91,17 @@ def parse_throughput(log_path, warmup=10):
 # }
 ```
 
-### 3.2.2 Extract Memory
+<a id="322-extract-memory"></a>
+### 3.2.2 提取显存
 
-Target log lines (logged every N steps or at peak):
+目标日志行，每 N 步或在峰值时记录：
 
 ```
 [Memory] Rank 0: allocated=58.2GB, reserved=61.4GB, max_allocated=61.1GB
 [Memory] Rank 1: allocated=58.3GB, reserved=61.5GB, max_allocated=61.2GB
 ```
 
-**Extraction:**
+**提取：**
 
 ```python
 def parse_memory(log_path):
@@ -145,7 +150,8 @@ def parse_memory(log_path):
 # }
 ```
 
-### 3.2.3 Extract Step Time
+<a id="323-extract-step-time"></a>
+### 3.2.3 提取步耗时
 
 ```python
 def parse_step_time(log_path, warmup=10):
@@ -175,13 +181,15 @@ def parse_step_time(log_path, warmup=10):
 # Result: {"mean_step_time_ms": 1203.5, "std_step_time_ms": 12.4}
 ```
 
-## 3.3 Profiler Trace Analysis
+<a id="33-profiler-trace-analysis"></a>
+## 3.3 性能追踪分析
 
-Use Torch profiler JSON output (`step_15_rank_0.pt.trace.json`).
+使用 Torch profiler 的 JSON 输出 `step_15_rank_0.pt.trace.json`。
 
-### 3.3.1 Communication Time Breakdown
+<a id="331-communication-time-breakdown"></a>
+### 3.3.1 通信耗时分解
 
-Extract collective ops (AllReduce, AllGather, ReduceScatter, etc.):
+提取 AllReduce、AllGather、ReduceScatter 等集合通信操作：
 
 ```python
 import json
@@ -235,9 +243,10 @@ def parse_profiler_trace(trace_path):
 # }
 ```
 
-### 3.3.2 Bubble Ratio (Pipeline Parallel)
+<a id="332-bubble-ratio-pipeline-parallel"></a>
+### 3.3.2 气泡比例（流水线并行）
 
-If `pp > 1`, compute bubble time:
+`pp > 1` 时，计算气泡时间：
 
 ```python
 def compute_bubble_ratio(trace_path, pp_degree):
@@ -274,18 +283,12 @@ def compute_bubble_ratio(trace_path, pp_degree):
 # Result: {"bubble_ratio": 0.061, "idle_time_ms": 73.5, "compute_time_ms": 1130.0}
 ```
 
-## 3.4 MFU from framework telemetry
+<a id="34-mfu-from-framework-telemetry"></a>
+## 3.4 从框架遥测获取 MFU
 
-Prefer the framework's measured output. Enable `training.mfu` with
-`enabled` and `peak_tflops_per_device`. The framework publishes
-`performance/mfu_percent`, `performance/model_tflops_per_device`, and
-`performance/tokens_per_s_per_device` using its PaLM-style model-FLOP
-convention. See
-[MFU accounting and targets](../../perf-playbook/references/mfu-targets.md)
-for MFU, executed-work HFU, and target definitions.
+优先使用框架实测输出。通过 `enabled` 和 `peak_tflops_per_device` 启用 `training.mfu`。框架按照 PaLM 风格的模型 FLOP 口径，发布 `performance/mfu_percent`、`performance/model_tflops_per_device` 和 `performance/tokens_per_s_per_device`。MFU、实际执行工作量 HFU 和目标定义，参见 [MFU 核算与目标](../../perf-playbook/references/mfu-targets.md)。
 
-If telemetry is unavailable, recompute offline using the same convention.
-For the standard dense-attention approximation:
+遥测不可用时，使用相同口径离线重算。标准稠密注意力近似如下：
 
 ```python
 def model_flops_per_token(active_matmul_params, layers, attention_width, seq_len):
@@ -293,22 +296,16 @@ def model_flops_per_token(active_matmul_params, layers, attention_width, seq_len
     return 6 * active_matmul_params + 12 * layers * attention_width * seq_len
 ```
 
-- `6 × N_active` already includes forward work of approximately `2N`
-  and backward work of approximately `4N`. Do not multiply it by two again.
-- Keep the sequence-dependent attention term; it can be substantial for
-  long sequences. Specialized attention architectures require their
-  corresponding model-FLOP implementation.
-- Exclude embedding lookups from `N_active`. Count routed expert matrix
-  parameters in proportion to `top_k / num_experts` for the supported
-  uniform expert architecture.
+- `6 × N_active` 已包含约 `2N` 的前向工作和约 `4N` 的反向工作，不要再次乘二。
+- 保留依赖序列长度的注意力项；长序列下该项可能占比较大。特殊注意力架构需要使用对应的模型 FLOP 实现。
+- 从 `N_active` 中排除嵌入查表。对支持的均匀专家架构，按 `top_k / num_experts` 比例计入路由专家矩阵参数。
 
-Always report MFU together with its accounting convention and device peak.
-Different conventions can produce substantially different values for the
-same run.
+报告 MFU 时始终说明核算口径和设备峰值。同一次运行在不同口径下，数值可能有明显差异。
 
-## 3.5 Consolidated Output
+<a id="35-consolidated-output"></a>
+## 3.5 汇总输出
 
-Merge all metrics into `validation_metrics.json`:
+将全部指标合并到 `validation_metrics.json`：
 
 ```json
 {
@@ -368,9 +365,10 @@ Merge all metrics into `validation_metrics.json`:
 }
 ```
 
-## 3.6 Error Handling
+<a id="36-error-handling"></a>
+## 3.6 错误处理
 
-**Missing metrics:**
+**缺失指标：**
 
 ```python
 def validate_metrics(metrics):
@@ -387,7 +385,7 @@ def validate_metrics(metrics):
     return {"status": "COMPLETE"}
 ```
 
-**Outlier detection:**
+**异常值检测：**
 
 ```python
 # Flag if std_dev > 20% of mean (unstable run)
@@ -395,9 +393,10 @@ if metrics["throughput"]["std_tokens_per_sec"] / metrics["throughput"]["tokens_p
     warnings.append("High throughput variance (>20%), consider re-running")
 ```
 
-## 3.7 Output for Phase 4
+<a id="37-output-for-phase-4"></a>
+## 3.7 交给阶段 4 的输出
 
-**Success:**
+**成功：**
 ```
 ✓ Metrics extracted from validation_run_20261016_143052.log
 ✓ Profiler traces analyzed (2 files)
@@ -408,7 +407,7 @@ if metrics["throughput"]["std_tokens_per_sec"] / metrics["throughput"]["tokens_p
 Ready to execute Phase 4: Comparison Report
 ```
 
-**With warnings:**
+**带警告：**
 ```
 ⚠ Metrics extracted with warnings:
   - Communication breakdown incomplete (no profiler trace for rank 0)

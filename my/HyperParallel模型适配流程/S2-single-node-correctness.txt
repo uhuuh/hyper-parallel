@@ -1,0 +1,67 @@
+S2 单节点正确性
+================
+
+阶段表直接要求
+
+- 使用清单 §6、hf-model-precision-validation。
+- 与普通 HF 构建做同进程逐位比较，保存报告，并保存训练冒烟 loss 曲线。
+- 零注册路线用该报告替代 integration_handoff.yaml，作为进入 S3 的前置证据。
+- 退出条件为前向一致，loss 有限且下降。
+
+fun S2_单节点正确性(任务, S0结果, S1结果) {
+    首轮检查 = READ(
+        ".agent/skills/hf-model-integration/references/bringup-field-checklist.md",
+        sections=[6]
+    )
+    真实权重冒烟 = 检查真实权重加载前向和生成(任务, S1结果, 首轮检查) # 比较权重和一次前向
+
+    if 任务.模型属于通用比较脚本支持范围 {
+        同进程比较 = SCRIPT(
+            ".agent/examples/hf_text_bringup/reproduce/parity_check.py",
+            任务.同进程比较参数
+        )
+        // 脚本对比参数、缓冲区和 logits，报告含每项差异。
+        // 参数中指定 --model-dir、--dtype、--output 等实际支持的选项。
+    } else {
+        同进程比较 = 按清单执行并持久化真实构建路径的逐位比较(
+            任务, S0结果.迁移规格.模型来源, S1结果
+        )
+        // 通用工具包以外的模型需选择适用的参考和比较入口，记录覆盖范围。
+    }
+
+    模块验证 = None
+    if S1结果.适配器 != None { # TODO 比较单个替换模块前向和反向，这个感觉顺序有问题，应该放在开头
+        模块验证 = SKILL(
+            "hf-model-precision-validation",
+            { 范围: "模块一致性", 参考实现: S0结果.迁移规格.模型来源, 候选: S1结果 }
+        )
+        交接证据 = 模块验证.integration_handoff及引用报告
+    } else {
+        交接证据 = 同进程比较.报告路径
+    }
+
+    冒烟结果 = 运行单节点训练冒烟(S1结果.工具包配置, 首轮检查)
+    缺失项 = 检查前向一致及Loss有限且下降( # TODO 比较实际训练，好像没有规定反向要求
+        同进程比较, 模块验证, 冒烟结果
+    )
+
+    return {
+        状态: if 缺失项.为空 "PASS" else "BLOCKED",
+        真实权重冒烟, 同进程比较, 模块验证, 交接证据, 冒烟结果, 缺失项
+    }
+}
+
+关联 Skill 和实际产物
+
+- .agent/skills/hf-model-precision-validation/SKILL.md。
+- .agent/examples/hf_text_bringup/reproduce/parity_check.py，走真实构建路径比较参数、缓冲及 logits。
+- .agent/examples/hf_text_bringup/prepare_text_data.py，生成工具包所用的确定性合成文本。
+- .agent/examples/hf_text_bringup/run_hf_text.sh，单节点启动器。
+- .agent/examples/hf_text_bringup/reproduce/reproduce.sh，stage_s2a() 执行同进程比较，stage_s2b() 执行训练冒烟。
+- 注册路线的模块验证可使用 model_integration parity --manifest ... --device cpu --dtype float32，再按 Skill 检查生产 dtype。
+- 模块验证通过后写 integration_handoff.yaml，引用结构、模块一致性和检查点覆盖报告。
+- 零注册路线的交接报告由阶段表明确允许，具体执行器需选择支持该路线的入口。
+- 文本工具包的对比报告通常为 parity.json，另保留训练日志和 loss 曲线。
+- 多模态任务按清单 §6 和精度 Skill 的模态要求使用实际输入与对应构建路径。
+
+

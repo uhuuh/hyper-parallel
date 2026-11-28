@@ -1,24 +1,29 @@
-# Phase 2: Candidate Generation
+<a id="phase-2-candidate-generation"></a>
+# 阶段 2：候选生成
 
-## Objective
-Generate 3-5 candidate strategies based on baseline analysis, model characteristics, and learned heuristics.
+<a id="objective"></a>
+## 目标
+根据基线分析、模型特征和已有启发式规则，生成 3～5 个候选策略。
 
-## Inputs
-- Baseline metrics (from Phase 1)
-- Model architecture:
-  - `num_layers`: Number of transformer layers
-  - `hidden_size`, `num_attention_heads`, `intermediate_size`
-  - `is_moe`: Whether model uses MoE
-- Hardware:
-  - `device_count`: Total available devices (e.g., 8)
-  - `device_memory_gb`: Memory per device (e.g., 64 GB)
-- Training config:
-  - `seq_len`: Sequence length
-  - Target improvement (default: 1.2x)
+<a id="inputs"></a>
+## 输入
+- 阶段 1 的基线指标
+- 模型架构：
+  - `num_layers`：Transformer 层数
+  - `hidden_size`、`num_attention_heads`、`intermediate_size`
+  - `is_moe`：模型是否采用 MoE
+- 硬件：
+  - `device_count`：可用设备总数，例如 8
+  - `device_memory_gb`：每设备显存，例如 64 GB
+- 训练配置：
+  - `seq_len`：序列长度
+  - 目标提升倍数，默认为 1.2 倍
 
-## Strategy Generation Rules
+<a id="strategy-generation-rules"></a>
+## 策略生成规则
 
-### Rule 1: Model Size → TP
+<a id="rule-1-model-size--tp"></a>
+### 规则 1：由模型规模选择 TP
 ```python
 if num_layers <= 10:
     tp_candidates = [1, 2]  # Prefer TP=1
@@ -28,7 +33,8 @@ else:
     tp_candidates = [4, 8]
 ```
 
-### Rule 2: Sequence Length → CP
+<a id="rule-2-sequence-length--cp"></a>
+### 规则 2：由序列长度选择 CP
 ```python
 if seq_len < 512:
     cp = 1  # Always 1 for short sequences
@@ -38,7 +44,8 @@ else:
     cp_candidates = [2, 4, 8]
 ```
 
-### Rule 3: MoE → EP
+<a id="rule-3-moe--ep"></a>
+### 规则 3：由 MoE 选择 EP
 ```python
 if is_moe:
     ep >= 2  # Required by framework
@@ -47,7 +54,8 @@ else:
     ep = 1
 ```
 
-### Rule 4: FSDP → DP
+<a id="rule-4-fsdp--dp"></a>
+### 规则 4：由 FSDP 选择 DP
 ```python
 # Always keep DP >= 2 (avoid FSDP conflicts)
 dp_min = 2
@@ -59,23 +67,25 @@ if dp < dp_min:
     pass
 ```
 
-### Rule 5: Baseline Optimization
-Based on bottleneck from Phase 1:
+<a id="rule-5-baseline-optimization"></a>
+### 规则 5：优化基线
+根据阶段 1 识别的瓶颈：
 
-**Communication-bound**:
-- Remove CP if present
-- Reduce TP if model is small
-- Increase DP (reduce other dimensions)
+**通信受限：**
+- 已启用 CP 时将其移除
+- 模型较小时减小 TP
+- 增大 DP，降低其他维度
 
-**Computation-bound**:
-- May already be optimal
-- Try reducing DP, increasing TP (if not maxed)
+**计算受限：**
+- 可能已经最优
+- 尝试减小 DP，并在 TP 未达上限时增大 TP
 
-**Memory-bound**:
-- Increase DP (enable more FSDP sharding)
-- Reduce TP/PP (reduce activation replication)
+**显存受限：**
+- 增大 DP，增加 FSDP 分片
+- 减小 TP/PP，减少激活复制
 
-## Candidate Generation Algorithm
+<a id="candidate-generation-algorithm"></a>
+## 候选生成算法
 
 ```python
 def generate_candidates(baseline, model_info, hardware, target_improvement=1.2):
@@ -135,14 +145,15 @@ def generate_candidates(baseline, model_info, hardware, target_improvement=1.2):
     return candidates[:5]  # Limit to top 5
 ```
 
-## Outputs
+<a id="outputs"></a>
+## 输出
 
-Generate for each candidate:
-1. **Config file**: `validation_experiment/{candidate_id}_config.yaml`
-2. **Launch script**: `validation_experiment/run_{candidate_id}.sh`
-3. **Metadata**: Expected improvement, rationale, risk level
+为每个候选生成：
+1. **配置文件：** `validation_experiment/{candidate_id}_config.yaml`
+2. **启动脚本：** `validation_experiment/run_{candidate_id}.sh`
+3. **元数据：** 预期收益、理由和风险级别
 
-Example output:
+输出示例：
 ```json
 {
   "candidates": [
@@ -166,16 +177,17 @@ Example output:
 }
 ```
 
-## Example (from experiment)
+<a id="example-from-experiment"></a>
+## 实验示例
 
-**Baseline**: TP=2, CP=2, EP=2, DP=2 (1081 tokens/s, communication-bound)
+**基线：** TP=2、CP=2、EP=2、DP=2，吞吐 1081 tokens/s，通信受限。
 
-**Generated Candidates**:
-1. TP=2, CP=1, EP=2, DP=2 — Remove CP
-2. TP=2, CP=1, EP=4, DP=1 — Increase EP (failed: DP=1 issue)
-3. TP=4, CP=1, EP=2, DP=1 — Increase TP (failed: DP=1 issue)
-4. TP=1, CP=1, EP=2, DP=4 — Minimal TP (winner: 4274 tokens/s)
+**生成的候选：**
+1. TP=2、CP=1、EP=2、DP=2：移除 CP
+2. TP=2、CP=1、EP=4、DP=1：增大 EP，因 DP=1 问题失败
+3. TP=4、CP=1、EP=2、DP=1：增大 TP，因 DP=1 问题失败
+4. TP=1、CP=1、EP=2、DP=4：使用最小 TP，胜出，吞吐 4274 tokens/s
 
 ---
 
-**Next**: Phase 3 (Batch Validation)
+**下一步：** 阶段 3，批量验证。

@@ -1,0 +1,20 @@
+
+
+autoresearch
+- https://github.com/karpathy/autoresearch
+- 固定时间优化模型能力
+- 将代码分为可变部分和不可变部分，只允许模型修改可变部分
+- 首次执行确认基线
+- 每次修改作为一个commit，然后测试，根据测试结果继续下一轮，或者回退当前commit
+- 同时将每次迭代详情写入到一个文件中
+
+skill规范
+https://agentskills.io/home 遵循这个
+
+迭代循环
+- 流程
+- 假设
+- 验证
+- 沉淀
+
+

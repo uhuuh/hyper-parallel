@@ -1,11 +1,21 @@
 
 
 autoresearch
+- https://github.com/karpathy/autoresearch
 - 固定时间优化模型能力
 - 将代码分为可变部分和不可变部分，只允许模型修改可变部分
 - 首次执行确认基线
 - 每次修改作为一个commit，然后测试，根据测试结果继续下一轮，或者回退当前commit
 - 同时将每次迭代详情写入到一个文件中
+
+skill规范
+https://agentskills.io/home 遵循这个
+
+迭代循环
+- 流程
+- 假设
+- 验证
+- 沉淀
 
 
 HyperParallel 模型适配流程 S0～S6
@@ -164,7 +174,7 @@ fun S1_适配实现(任务, 迁移规格) {
         sections=[5]
     )
 
-    工具包配置 = 配置通用模型构建和训练Recipe(迁移规格, 构建说明)
+    工具包配置 = 配置通用模型构建和训练Recipe(迁移规格, 构建说明) # 按照s0并行计划中的推荐并行配置，生成recipe
     需要Provider = 判断任务所需能力是否需要模型专属扩展(迁移规格, 工具包配置)
     适配器 = None
 
@@ -230,7 +240,7 @@ fun S2_单节点正确性(任务, S0结果, S1结果) {
         ".agent/skills/hf-model-integration/references/bringup-field-checklist.md",
         sections=[6]
     )
-    真实权重冒烟 = 检查真实权重加载前向和生成(任务, S1结果, 首轮检查)
+    真实权重冒烟 = 检查真实权重加载前向和生成(任务, S1结果, 首轮检查) # 比较权重和一次前向
 
     if 任务.模型属于通用比较脚本支持范围 {
         同进程比较 = SCRIPT(
@@ -247,7 +257,7 @@ fun S2_单节点正确性(任务, S0结果, S1结果) {
     }
 
     模块验证 = None
-    if S1结果.适配器 != None {
+    if S1结果.适配器 != None { # TODO 比较单个替换模块前向和反向，这个感觉顺序有问题，应该放在开头
         模块验证 = SKILL(
             "hf-model-precision-validation",
             { 范围: "模块一致性", 参考实现: S0结果.迁移规格.模型来源, 候选: S1结果 }
@@ -258,7 +268,7 @@ fun S2_单节点正确性(任务, S0结果, S1结果) {
     }
 
     冒烟结果 = 运行单节点训练冒烟(S1结果.工具包配置, 首轮检查)
-    缺失项 = 检查前向一致及Loss有限且下降(
+    缺失项 = 检查前向一致及Loss有限且下降( # TODO 比较实际训练，好像没有规定反向要求
         同进程比较, 模块验证, 冒烟结果
     )
 
@@ -301,7 +311,8 @@ fun S3_分布式等价(任务, S0结果, S1结果, S2结果) {
         return { 状态: "BLOCKED", 缺失项: 交接检查.缺失项 }
     }
 
-    矩阵 = 制定目标布局重计算和重跑矩阵(S0结果.迁移规格, 精度指南)
+    # TODO 有必要进行这一步吗？rsi优化出最佳配置，有必要使用其他配置吗？另外是不是不需要预先生成一个检查矩阵，再后续rsi迭代过程中，再进行正确性检查不行吗？
+    矩阵 = 制定目标布局重计算和重跑矩阵(S0结果.迁移规格, 精度指南) # 围绕设置并行，验证一下不同并行和重计算组合的精度
     比较条件 = 固定发布权重输入及运行证据设置(矩阵, 任务, 精度指南)
 
     矩阵结果 = SKILL(
@@ -356,7 +367,7 @@ fun S4_分析与优化(任务, S1结果, S3结果) {
     瓶颈清单 = 分析性能和显存证据(性能基线, 显存分析)
 
     // 关联展开来自 training-rsi.md 和 perf-playbook。
-    if 任务.要求端到端MFU优化 {
+    if 任务.要求端到端MFU优化 { # 根据优化目标走不同的流程，感觉mfu riser应该复用autoresearch流程，不要单独存在
         实验结果 = SKILL(
             "mfu-riser",
             { 实验条件, 性能基线, 显存分析, 瓶颈清单, 候选源码: S1结果 }
@@ -605,3 +616,194 @@ python .agent/skills/formal-verification/scripts/verify.py run --profile <profil
 9. 本说明整理流程和源码映射，编写说明的过程中只进行了读取和文件编辑。
 
 
+三个关键 Skill：规划、训练优化与通用实验
+======================================
+
+整理范围
+
+- 以下内容依据当前 checkout 1d609bfb 中的 Skill 文档与 Python 实现追加。
+- 前文记录的 f8572d71 是原流程说明的版本；本节不表示已核对两版本完全一致。
+- 普通函数与逻辑对象仍是说明用伪代码，不是实际 API。
+- parallel-strategy-analyzer 负责估算和推荐，不运行训练。
+- mfu-riser 与 autoresearch 是两个实验执行入口，不是前者调用后者。
+- 二者共同接入 .agent/scripts/rsi_learning.py，但实验状态、配置和执行协议各自独立。
+
+
+parallel-strategy-analyzer：并行策略规划
+=======================================
+
+职责和边界
+
+- 入口为 .agent/skills/parallel-strategy-analyzer/SKILL.md。
+- 根据模型、设备和工作负载约束，推荐 DP/FSDP/TP/PP/CP/EP 组合。
+- 同时分析显存、通信、计算和流水线气泡，给出重计算、offload 等适用建议。
+- 在模型适配流程中用于 S0 规划；性能优化时也可重新用于形成候选。
+- 输出是估算与建议，不是已经验证的可执行训练结果。
+
+fun 并行策略规划(任务) {
+    READ(".agent/skills/parallel-strategy-analyzer/references/io-contract.md")
+    信息 = 按01收集模型设备及约束(任务)
+    // 模型名称或参数量、设备数量、设备类型为必要信息。
+    // 文档未提供时的默认值：seq_len=4096、global_batch=1024、micro_batch=1、bf16、adam。
+    // 使用已有实际配置时保留其工作负载，不把估算默认值当成任务事实。
+    全局基线 = 按02估算无并行显存及FLOPs(信息)
+    候选 = 按03枚举并剪枝并行组合(信息, 全局基线)
+
+    for 方案 in 候选 {
+        通信与气泡 = 按04估算各维通信及重叠(方案, 信息)
+        分片显存 = 按05估算各设备状态和激活占用(方案, 信息)
+        评分 = 按05文档公式排序(方案, 分片显存, 通信与气泡)
+        // 超过90%显存容量的候选淘汰。
+        // 评分 = 100*估算MFU + 20*(1-abs(显存利用率-0.75)) - 2*启用并行维度数。
+        // 估算MFU来自理论计算时间、暴露通信和气泡，不是实测MFU。
+        保存候选分析(方案, 评分)
+    }
+
+    return 汇总基线推荐及备选(
+        推荐布局, DeviceMesh示例, 分片显存, 通信分解,
+        气泡, 显存优化建议, Top3备选, 估算假设及限制
+    )
+}
+
+实际文件和后续使用
+
+- workflows/01-collect-model-info.md：输入、模型与硬件信息、默认值。
+- workflows/02-global-baseline.md：未分片显存与模型计算量。
+- workflows/03-strategy-search.md：候选枚举及剪枝。
+- workflows/04-cost-analysis.md：通信量、重叠和流水线气泡。
+- workflows/05-scoring-output.md：分片显存、启发式评分及报告格式。
+- references/known-models.md、known-hardware.md、strategy-rules.md：参数和选择规则。
+- 本 Skill 没有一条运行上述全部分析的统一 Python CLI；Agent 按文档执行分析。
+- strategy-validator/workflows/01-config-generation.md 描述如何把选定建议转成训练配置。
+- 推荐配置可用于 S1 Recipe；S3 验证矩阵另行覆盖所需布局与重计算等条件。
+- Top1估算不代表性能已最优，不表示必须只测Top1，也不表示必须执行全部备选。
+
+
+mfu-riser：有预算的训练性能优化
+==============================
+
+职责和边界
+
+- 入口为 .agent/skills/mfu-riser/SKILL.md。
+- 主要用于 S4 的训练性能搜索，并衔接确认、验收和经验沉淀。
+- Agent 分析证据、编写候选和 plan；Python 控制器不包含额外LLM、不自动生成优化方案。
+- 用 profiling、memory-analysis 等采集证据；用 perf-playbook 选择方法和约定指标。
+- 实验控制器运行于Linux，要求可复现的模型状态、数据、启动命令、设备、目标和预算。
+- 不自带集群专属SSH或torchrun启动器；首次接入需将实际训练入口连接到命令协议。
+
+fun 训练性能优化(任务, 基线配置) {
+    READ(".agent/skills/mfu-riser/references/contracts.md")
+    READ(".agent/skills/mfu-riser/references/planner.md")
+    READ(".agent/skills/mfu-riser/references/acceptance.md")
+    冻结模型语义工作负载精度和测量口径()
+    配置 = 编写RunJson及五阶段命令(基线配置, 任务)
+    SCRIPT(".agent/skills/mfu-riser/scripts/mfu_riser.py", ["init", ...])
+
+    while 状态允许继续 {
+        证据 = 读取最佳候选及性能显存和负面结果()
+        计划 = Agent提出并实现可检验方案(证据)
+        WRITE(计划路径, 计划)
+        结果 = SCRIPT(".agent/skills/mfu-riser/scripts/mfu_riser.py", ["trial", ...])
+        // run_trial() 先检查预算和计划，保存源码清单与快照。
+        // 实际执行顺序：precheck -> benchmark -> profile -> validate。
+        // 随后检查被测源码和验证脚本未改变，校验measurement.json并作决策。
+        // finally执行cleanup；清理失败会保留pending，不能直接开始下一轮。
+        // 正常完成后更新状态、追加历史，并按策略触发共享RSI引擎。
+        状态 = SCRIPT(".agent/skills/mfu-riser/scripts/mfu_riser.py", ["status", ...])
+        // screening达标不等于正式验收；按协议进入acceptance及独立confirm。
+        // 失败和确认实验同样消耗预算。
+    }
+
+    SCRIPT(".agent/skills/mfu-riser/scripts/mfu_riser.py", ["report", ...])
+    RSI结果 = SCRIPT(".agent/skills/mfu-riser/scripts/mfu_riser.py", ["finalize", ...])
+    return 汇总最佳有效候选目标差距及独立RSI报告()
+}
+
+实际脚本命令
+
+python .agent/skills/mfu-riser/scripts/mfu_riser.py init --run-dir <run-dir> --config <run.json>
+python .agent/skills/mfu-riser/scripts/mfu_riser.py trial --run-dir <run-dir> --plan <plan.json>
+python .agent/skills/mfu-riser/scripts/mfu_riser.py status --run-dir <run-dir>
+python .agent/skills/mfu-riser/scripts/mfu_riser.py recover --run-dir <run-dir>
+python .agent/skills/mfu-riser/scripts/mfu_riser.py report --run-dir <run-dir>
+python .agent/skills/mfu-riser/scripts/mfu_riser.py finalize --run-dir <run-dir>
+
+对应文件与产物
+
+- scripts/mfu_riser.py：initialize、run_trial、recover、status、report、learning_checkpoint。
+- scripts/riser_contract.py：配置、测量、预算相关计算和候选决策约束。
+- scripts/collect_state.py：提取性能分析状态。
+- scripts/audit_rank_steps.py：审核各rank训练步及测量记录的覆盖情况。
+- controller.json：预算、pending、最佳候选等控制状态。
+- history.jsonl：追加式实验历史。
+- 每轮目录保存context.json、source.tar.gz、阶段日志、measurement.json和result.json等证据。
+- REPORT.md记录性能结果；RSI_REPORT.html、RSI_REPORT.md和rsi/report.json单独记录经验处理。
+- 最佳结果指向候选workspace和快照；控制器不会自动覆盖用户源码或部署。
+
+
+autoresearch：提交、验证、测量与保留恢复
+=======================================
+
+职责和边界
+
+- 入口为 .agent/skills/autoresearch/SKILL.md。
+- 适合指定目标文件的算子、图或其他代码优化实验，也可接入结构化训练协议。
+- 可用于 S4；S5调用finalize检查经验复盘是否完整。
+- Agent选择想法、修改目标并维护解释性记录；工具执行确定性的实验协议。
+- 不等同于文件开头引用的外部karpathy/autoresearch实现，本节描述本仓库工具。
+
+fun 通用优化实验(任务) {
+    SCRIPT(".agent/skills/autoresearch/scripts/autoresearch.py", ["init", ...])
+    填写ManualSetup并核对RunJson()
+    // 明确目标文件、benchmark/gate命令、指标、噪声、预算和RSI模式。
+    // 命令为argv列表；训练协议要求独立gate和benchmark及结构化凭据。
+    SCRIPT(".agent/skills/autoresearch/scripts/autoresearch.py", ["baseline", ...])
+
+    while Agent判断目标未达到且预算尚有剩余 {
+        读取StatusIdeasLearnings和ExperimentLog()
+        优先审阅已满足重试条件的候选()
+        修改声明的目标文件()
+        结果 = SCRIPT(".agent/skills/autoresearch/scripts/autoresearch.py", ["iterate", ...])
+        // loop.iterate()拒绝目标文件和运行目录以外的脏改动。
+        // 先提交候选，再执行门禁与测量，确保测量对应已提交代码。
+        // 缺少必需生效标记或门禁失败为crash，不让漂亮指标掩盖失败。
+        // 按指标方向、噪声和可选重复确认决定keep/discard/crash。
+        // 保存结果与候选凭据；非keep用新的正向提交恢复实验前目标文件。
+        更新ExperimentLogIdeas和Learnings(结果)
+        // CLI在baseline和iterate后调用_learning_checkpoint()。
+        // acceptance模式默认在验收处理；continuous模式支持逐轮处理。
+    }
+
+    RSI结果 = SCRIPT(".agent/skills/autoresearch/scripts/autoresearch.py", ["finalize", ...])
+    return 汇总实际最佳结果及完整RSI报告()
+}
+
+实际脚本命令
+
+python .agent/skills/autoresearch/scripts/autoresearch.py init --run-dir <run-dir> --target <file> --benchmark-cmd "<command>" --gate-cmd "<command>"
+python .agent/skills/autoresearch/scripts/autoresearch.py baseline --run-dir <run-dir>
+python .agent/skills/autoresearch/scripts/autoresearch.py iterate --run-dir <run-dir> --description "<change>"
+python .agent/skills/autoresearch/scripts/autoresearch.py status --run-dir <run-dir>
+python .agent/skills/autoresearch/scripts/autoresearch.py learn --run-dir <run-dir>
+python .agent/skills/autoresearch/scripts/autoresearch.py finalize --run-dir <run-dir>
+
+- init可用--rsi-mode acceptance或continuous，默认acceptance。
+- iterate可用--changes、--revisit-on和--retry-of记录条件重试关系。
+- 后续keep改变了等待的scope后，status可显示retry_ready；重新应用仍作为新实验测量。
+
+对应文件与产物
+
+- scripts/autoresearch.py：CLI分发、初始化、经验检查点及只提交自身经验改动。
+- scripts/config.py：实验配置读取与校验。
+- scripts/loop.py：record_baseline、iterate、门禁测量、噪声确认、历史及恢复。
+- references/experience-consolidation.md：经验复盘文件和共享RSI引擎的使用要求。
+- run.json：目标文件、命令、指标提取、噪声、可选训练协议和RSI模式。
+- manual.md：填写本轮[SETUP]，包含预算、读写范围及不可修改项。
+- ideas.md、learnings.md、experiment_log.md：Agent维护的想法、经验和实验解释。
+- results.tsv：工具追加的指标和决策台账。
+- candidates.jsonl：候选提交、阶段、门禁、标记、结果、条件重试及适用的训练凭据。
+- .agent/scripts/rsi_learning.py：两个实验入口共用的证据审核、经验去重、验证与事务式回写。
+- .agent/learning/registry.json：经验与所属Skill索引。
+- 实验失败记录保留在历史中；恢复目标文件不通过重写Git历史完成。
+- finalize要求经验复盘完整；可以没有新经验，但不能遗漏失败实验。
+- 本节仅追加说明，未执行训练、实验控制器、提交或经验回写。

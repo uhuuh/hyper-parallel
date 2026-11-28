@@ -1,0 +1,62 @@
+mfu-riser：有预算的训练性能优化
+==============================
+
+职责和边界
+
+- 入口为 .agent/skills/mfu-riser/SKILL.md。
+- 主要用于 S4 的训练性能搜索，并衔接确认、验收和经验沉淀。
+- Agent 分析证据、编写候选和 plan；Python 控制器不包含额外LLM、不自动生成优化方案。
+- 用 profiling、memory-analysis 等采集证据；用 perf-playbook 选择方法和约定指标。
+- 实验控制器运行于Linux，要求可复现的模型状态、数据、启动命令、设备、目标和预算。
+- 不自带集群专属SSH或torchrun启动器；首次接入需将实际训练入口连接到命令协议。
+
+fun 训练性能优化(任务, 基线配置) {
+    READ(".agent/skills/mfu-riser/references/contracts.md")
+    READ(".agent/skills/mfu-riser/references/planner.md")
+    READ(".agent/skills/mfu-riser/references/acceptance.md")
+    冻结模型语义工作负载精度和测量口径()
+    配置 = 编写RunJson及五阶段命令(基线配置, 任务)
+    SCRIPT(".agent/skills/mfu-riser/scripts/mfu_riser.py", ["init", ...])
+
+    while 状态允许继续 {
+        证据 = 读取最佳候选及性能显存和负面结果()
+        计划 = Agent提出并实现可检验方案(证据)
+        WRITE(计划路径, 计划)
+        结果 = SCRIPT(".agent/skills/mfu-riser/scripts/mfu_riser.py", ["trial", ...])
+        // run_trial() 先检查预算和计划，保存源码清单与快照。
+        // 实际执行顺序：precheck -> benchmark -> profile -> validate。
+        // 随后检查被测源码和验证脚本未改变，校验measurement.json并作决策。
+        // finally执行cleanup；清理失败会保留pending，不能直接开始下一轮。
+        // 正常完成后更新状态、追加历史，并按策略触发共享RSI引擎。
+        状态 = SCRIPT(".agent/skills/mfu-riser/scripts/mfu_riser.py", ["status", ...])
+        // screening达标不等于正式验收；按协议进入acceptance及独立confirm。
+        // 失败和确认实验同样消耗预算。
+    }
+
+    SCRIPT(".agent/skills/mfu-riser/scripts/mfu_riser.py", ["report", ...])
+    RSI结果 = SCRIPT(".agent/skills/mfu-riser/scripts/mfu_riser.py", ["finalize", ...])
+    return 汇总最佳有效候选目标差距及独立RSI报告()
+}
+
+实际脚本命令
+
+python .agent/skills/mfu-riser/scripts/mfu_riser.py init --run-dir <run-dir> --config <run.json>
+python .agent/skills/mfu-riser/scripts/mfu_riser.py trial --run-dir <run-dir> --plan <plan.json>
+python .agent/skills/mfu-riser/scripts/mfu_riser.py status --run-dir <run-dir>
+python .agent/skills/mfu-riser/scripts/mfu_riser.py recover --run-dir <run-dir>
+python .agent/skills/mfu-riser/scripts/mfu_riser.py report --run-dir <run-dir>
+python .agent/skills/mfu-riser/scripts/mfu_riser.py finalize --run-dir <run-dir>
+
+对应文件与产物
+
+- scripts/mfu_riser.py：initialize、run_trial、recover、status、report、learning_checkpoint。
+- scripts/riser_contract.py：配置、测量、预算相关计算和候选决策约束。
+- scripts/collect_state.py：提取性能分析状态。
+- scripts/audit_rank_steps.py：审核各rank训练步及测量记录的覆盖情况。
+- controller.json：预算、pending、最佳候选等控制状态。
+- history.jsonl：追加式实验历史。
+- 每轮目录保存context.json、source.tar.gz、阶段日志、measurement.json和result.json等证据。
+- REPORT.md记录性能结果；RSI_REPORT.html、RSI_REPORT.md和rsi/report.json单独记录经验处理。
+- 最佳结果指向候选workspace和快照；控制器不会自动覆盖用户源码或部署。
+
+

@@ -1,0 +1,73 @@
+S1 适配实现
+============
+
+阶段表直接要求
+
+- 使用本 Skill、add-unit-test、feature-doc†。
+- 产物为通用工具包上的 recipe，需要 provider 才提供适配器。
+- 发布布局检查使用清单 §5 的脚本，退出码为 0，并声明 full-shape 或 names-only 覆盖。
+- 退出条件为布局检查通过，适用的家族测试通过。
+
+fun S1_适配实现(任务, 迁移规格) {
+    // 关联参考来自主 Skill 的 Load 要求和清单 §4。
+    // S1 行直接指定的清单章节是 §5。
+    构建说明 = READ(
+        ".agent/skills/hf-model-integration/references/bringup-field-checklist.md",
+        sections=[4]
+    )
+    布局说明 = READ(
+        ".agent/skills/hf-model-integration/references/bringup-field-checklist.md",
+        sections=[5]
+    )
+
+    工具包配置 = 配置通用模型构建和训练Recipe(迁移规格, 构建说明) # 按照s0并行计划中的推荐并行配置，生成recipe
+    需要Provider = 判断任务所需能力是否需要模型专属扩展(迁移规格, 工具包配置)
+    适配器 = None
+
+    if 需要Provider {
+        分析指南 = READ(
+            ".agent/skills/hf-model-integration/references/model-analysis-and-adapter.md"
+        )
+        适配器 = 实现所需的模型适配器(迁移规格, 分析指南)
+    }
+
+    测试 = SKILL("add-unit-test", { 迁移规格, 工具包配置, 适配器 })
+    文档 = SKILL("feature-doc", { 迁移规格, 工具包配置, 适配器 })
+
+    布局检查 = SCRIPT(
+        ".agent/skills/hf-model-integration/scripts/check_released_layout.py",
+        ["--model-dir", 任务.模型目录]
+    )
+    覆盖说明 = 从检查输出记录完整形状或仅名称覆盖(布局检查)
+    家族测试结果 = 运行适用的家族测试(测试, 工具包配置, 适配器)
+
+    return {
+        状态: if 布局检查.退出码 == 0 && 家族测试结果.通过 "PASS" else "BLOCKED",
+        工具包配置, 适配器, 测试, 文档, 布局检查, 覆盖说明, 家族测试结果
+    }
+}
+
+Provider 的含义和条件
+
+- 当前实现位于 hyper_parallel/models/adapter_spec.py 的 ModelAdapterSpec。
+- 通用构建与规划已覆盖需求时可以走 HF 原生零注册路线。
+- 模型专属分片规则对应 sharding_rules。
+- 模型专属模块替换与权重转换对应 replacements。
+- 模型专属序列或专家通信对应 context_parallel、expert_parallel。
+- 特殊 FSDP 包装、排除和执行顺序对应 fsdp_wrap_modules、fsdp_excluded_subtrees、fsdp_execution_order。
+- 专属重计算和 loss 适配对应 recompute、loss。
+- 启用某个并行维度时，要检查该模型语义是否已被通用实现或 recipe 覆盖。
+
+实际配置与脚本
+
+- .agent/examples/hf_text_bringup/build_model.py，build_hf_causal_lm() 是通用文本模型构建入口。
+- .agent/examples/hf_text_bringup/train_hf_text.yaml，model._target_ 指向上述构建函数。
+- .agent/skills/hf-model-integration/scripts/check_released_layout.py，比较发布名称、形状及共享别名，报告形状覆盖。
+- .agent/examples/hf_text_bringup/reproduce/reproduce.sh 的 stage_s1() 调用布局检查和 check_tied_save.py。
+- check_tied_save.py 是清单 §5b 的共享权重保存预检。主 Skill 还在 S0/S1 成本检查的说明中引用它。
+- .agent/skills/add-unit-test/SKILL.md 是单测编写入口。
+- .agent/skills/feature-doc/SKILL.md 使用其 templates/feature-design-doc.md。
+- 本 Skill 的 Workflow 还提供 inspect、scaffold、check 命令。新家族及自定义适配按对应条目执行。
+- CLI 统一入口为 python -m hyper_parallel.tools.model_integration，实现在 hyper_parallel/tools/model_integration/cli.py。
+
+

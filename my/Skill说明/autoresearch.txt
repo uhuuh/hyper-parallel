@@ -1,0 +1,66 @@
+autoresearch：提交、验证、测量与保留恢复
+=======================================
+
+职责和边界
+
+- 入口为 .agent/skills/autoresearch/SKILL.md。
+- 适合指定目标文件的算子、图或其他代码优化实验，也可接入结构化训练协议。
+- 可用于 S4；S5调用finalize检查经验复盘是否完整。
+- Agent选择想法、修改目标并维护解释性记录；工具执行确定性的实验协议。
+- 不等同于文件开头引用的外部karpathy/autoresearch实现，本节描述本仓库工具。
+
+fun 通用优化实验(任务) {
+    SCRIPT(".agent/skills/autoresearch/scripts/autoresearch.py", ["init", ...])
+    填写ManualSetup并核对RunJson()
+    // 明确目标文件、benchmark/gate命令、指标、噪声、预算和RSI模式。
+    // 命令为argv列表；训练协议要求独立gate和benchmark及结构化凭据。
+    SCRIPT(".agent/skills/autoresearch/scripts/autoresearch.py", ["baseline", ...])
+
+    while Agent判断目标未达到且预算尚有剩余 {
+        读取StatusIdeasLearnings和ExperimentLog()
+        优先审阅已满足重试条件的候选()
+        修改声明的目标文件()
+        结果 = SCRIPT(".agent/skills/autoresearch/scripts/autoresearch.py", ["iterate", ...])
+        // loop.iterate()拒绝目标文件和运行目录以外的脏改动。
+        // 先提交候选，再执行门禁与测量，确保测量对应已提交代码。
+        // 缺少必需生效标记或门禁失败为crash，不让漂亮指标掩盖失败。
+        // 按指标方向、噪声和可选重复确认决定keep/discard/crash。
+        // 保存结果与候选凭据；非keep用新的正向提交恢复实验前目标文件。
+        更新ExperimentLogIdeas和Learnings(结果)
+        // CLI在baseline和iterate后调用_learning_checkpoint()。
+        // acceptance模式默认在验收处理；continuous模式支持逐轮处理。
+    }
+
+    RSI结果 = SCRIPT(".agent/skills/autoresearch/scripts/autoresearch.py", ["finalize", ...])
+    return 汇总实际最佳结果及完整RSI报告()
+}
+
+实际脚本命令
+
+python .agent/skills/autoresearch/scripts/autoresearch.py init --run-dir <run-dir> --target <file> --benchmark-cmd "<command>" --gate-cmd "<command>"
+python .agent/skills/autoresearch/scripts/autoresearch.py baseline --run-dir <run-dir>
+python .agent/skills/autoresearch/scripts/autoresearch.py iterate --run-dir <run-dir> --description "<change>"
+python .agent/skills/autoresearch/scripts/autoresearch.py status --run-dir <run-dir>
+python .agent/skills/autoresearch/scripts/autoresearch.py learn --run-dir <run-dir>
+python .agent/skills/autoresearch/scripts/autoresearch.py finalize --run-dir <run-dir>
+
+- init可用--rsi-mode acceptance或continuous，默认acceptance。
+- iterate可用--changes、--revisit-on和--retry-of记录条件重试关系。
+- 后续keep改变了等待的scope后，status可显示retry_ready；重新应用仍作为新实验测量。
+
+对应文件与产物
+
+- scripts/autoresearch.py：CLI分发、初始化、经验检查点及只提交自身经验改动。
+- scripts/config.py：实验配置读取与校验。
+- scripts/loop.py：record_baseline、iterate、门禁测量、噪声确认、历史及恢复。
+- references/experience-consolidation.md：经验复盘文件和共享RSI引擎的使用要求。
+- run.json：目标文件、命令、指标提取、噪声、可选训练协议和RSI模式。
+- manual.md：填写本轮[SETUP]，包含预算、读写范围及不可修改项。
+- ideas.md、learnings.md、experiment_log.md：Agent维护的想法、经验和实验解释。
+- results.tsv：工具追加的指标和决策台账。
+- candidates.jsonl：候选提交、阶段、门禁、标记、结果、条件重试及适用的训练凭据。
+- .agent/scripts/rsi_learning.py：两个实验入口共用的证据审核、经验去重、验证与事务式回写。
+- .agent/learning/registry.json：经验与所属Skill索引。
+- 实验失败记录保留在历史中；恢复目标文件不通过重写Git历史完成。
+- finalize要求经验复盘完整；可以没有新经验，但不能遗漏失败实验。
+- 本节仅追加说明，未执行训练、实验控制器、提交或经验回写。

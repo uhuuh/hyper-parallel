@@ -1,30 +1,35 @@
-# Benchmark Recipes
+<a id="benchmark-recipes"></a>
+# 基准测试 Recipe
 
-Standard workloads for validating parallel strategies.
+用于验证并行策略的标准工作负载。
 
-## Design Principles
+<a id="design-principles"></a>
+## 设计原则
 
-1. **Reproducibility**: Fixed seed, synthetic data, deterministic operations
-2. **Speed**: 50 steps (~5-10 min) sufficient for throughput/memory measurement
-3. **Coverage**: Representative of real training (forward + backward + optimizer step)
-4. **Profiling**: Enable trace collection at specific checkpoints
+1. **可复现：** 固定种子、合成数据、确定性操作
+2. **速度：** 50 步，约 5～10 分钟，足以测量吞吐和显存
+3. **覆盖：** 具有真实训练的代表性，包括前向、反向和优化器更新
+4. **性能分析：** 在指定记录点启用追踪采集
 
-## Standard Recipe: Language Model Pre-Training
+<a id="standard-recipe-language-model-pre-training"></a>
+## 标准 Recipe：语言模型预训练
 
-### Target Models
+<a id="target-models"></a>
+### 目标模型
 
-| Model | Params | Layers | Hidden | Heads | KV Heads | FFN Dim | Validation Time |
+| 模型 | 参数量 | 层数 | 隐藏维度 | 注意力头数 | KV 头数 | FFN 维度 | 验证时间 |
 |-------|--------|--------|--------|-------|----------|---------|-----------------|
-| Qwen3-0.5B | 0.5B | 24 | 896 | 14 | 2 | 4864 | ~2 min |
-| Qwen3-1.8B | 1.8B | 24 | 2048 | 16 | 2 | 11008 | ~3 min |
-| Qwen3-7B | 7B | 28 | 4096 | 32 | 4 | 11008 | ~5 min |
-| Qwen3-14B | 14B | 40 | 5120 | 40 | 8 | 13824 | ~7 min |
-| Qwen3-30B-A3B (cropped) | ~12B | 24 | 8192 | 64 | 8 | 29568 | ~8 min |
-| Qwen3-30B-A3B (full) | 30B | 60 | 8192 | 64 | 8 | 29568 | ~15 min |
+| Qwen3-0.5B | 0.5B | 24 | 896 | 14 | 2 | 4864 | 约 2 分钟 |
+| Qwen3-1.8B | 1.8B | 24 | 2048 | 16 | 2 | 11008 | 约 3 分钟 |
+| Qwen3-7B | 7B | 28 | 4096 | 32 | 4 | 11008 | 约 5 分钟 |
+| Qwen3-14B | 14B | 40 | 5120 | 40 | 8 | 13824 | 约 7 分钟 |
+| Qwen3-30B-A3B（裁剪） | 约 12B | 24 | 8192 | 64 | 8 | 29568 | 约 8 分钟 |
+| Qwen3-30B-A3B（完整） | 30B | 60 | 8192 | 64 | 8 | 29568 | 约 15 分钟 |
 
-**Cropping for speed:** Reduce layers to 24-40% of original to get 2-3x faster runs while preserving memory/comm characteristics.
+**通过裁剪加快验证：** 将层数减至原来的 24～40%，在保留显存与通信特征的同时，将运行加快 2～3 倍。
 
-### Workload Parameters
+<a id="workload-parameters"></a>
+### 工作负载参数
 
 ```yaml
 benchmark_recipe: lm_pretraining
@@ -71,7 +76,8 @@ logging:
   log_level: info
 ```
 
-### Synthetic Data Generator
+<a id="synthetic-data-generator"></a>
+### 合成数据生成器
 
 ```python
 import torch
@@ -129,11 +135,13 @@ def create_benchmark_dataloader(config, parallel_config):
     return dataloader
 ```
 
-## Recipe Variants
+<a id="recipe-variants"></a>
+## Recipe 变体
 
-### 1. Memory-Limited Validation (Fast)
+<a id="1-memory-limited-validation-fast"></a>
+### 1. 显存受限验证（快速）
 
-For quick checks (OOM detection, basic throughput):
+用于 OOM 检测、基本吞吐等快速检查：
 
 ```yaml
 training:
@@ -148,11 +156,12 @@ logging:
   logging_steps: 1
 ```
 
-**Use case:** Initial screening of Top-3 candidates (2-3 min each)
+**使用场景：** 初步筛选前三个候选，每个约需 2～3 分钟。
 
-### 2. Full Profiling Validation
+<a id="2-full-profiling-validation"></a>
+### 2. 完整性能分析验证
 
-For detailed communication/compute analysis:
+用于详细的通信与计算分析：
 
 ```yaml
 training:
@@ -172,11 +181,12 @@ profiling:
   with_modules: true
 ```
 
-**Use case:** Production-readiness validation, PSA calibration
+**使用场景：** 生产就绪验证、PSA 校准。
 
-### 3. Long-Context Validation
+<a id="3-long-context-validation"></a>
+### 3. 长上下文验证
 
-For CP/sequence-parallel strategies:
+用于 CP 或序列并行策略：
 
 ```yaml
 model:
@@ -191,11 +201,12 @@ training:
   gradient_accumulation_steps: 4  # Maintain global batch
 ```
 
-**Use case:** CP > 1 strategies, long-sequence workloads
+**使用场景：** CP > 1 的策略、长序列工作负载。
 
-### 4. MoE Validation
+<a id="4-moe-validation"></a>
+### 4. MoE 验证
 
-For EP (expert parallel):
+用于 EP，即专家并行：
 
 ```yaml
 model:
@@ -210,45 +221,40 @@ profiling:
   # Monitor AllToAll communication for EP
 ```
 
-**Use case:** EP > 1, MoE models
+**使用场景：** EP > 1、MoE 模型。
 
-## Expected Outputs
+<a id="expected-outputs"></a>
+## 预期输出
 
-### Success Metrics (per recipe)
+<a id="success-metrics-per-recipe"></a>
+### 各 Recipe 的成功指标
 
-**Derive targets from a measured baseline for this workload.** Absolute
-throughput, memory usage, and MFU depend on the architecture, sequence
-length, parallel layout, optimizer, and software/hardware versions.
-A range copied from another configuration is not an acceptance criterion.
-For example, a sparse MoE with a matrix optimizer can report PaLM MFU near
-12% without implying the same bottleneck as a dense model.
+**根据该工作负载的实测基线制定目标。** 绝对吞吐、显存占用和 MFU 取决于架构、序列长度、并行布局、优化器以及软硬件版本。从其他配置复制的范围不能作为验收标准。例如，使用矩阵优化器的稀疏 MoE 可能报告约 12% 的 PaLM MFU，但这并不意味着它与稠密模型具有相同瓶颈。
 
-| Criterion | Definition |
+| 标准 | 定义 |
 |---|---|
-| Throughput / step time | Improvement relative to the measured baseline for this run. |
-| Memory | Fraction of device capacity, with a declared OOM margin. |
-| MFU / HFU | Declare each accounting convention, then use a baseline-relative target or a documented roofline analysis. |
-| Candidate comparison | Same nodes, device count, and measured step count; exclude the agreed warmup and run back-to-back. |
+| 吞吐 / 步耗时 | 相对本轮实测基线的改进。 |
+| 显存 | 设备容量占比，并声明 OOM 余量。 |
+| MFU / HFU | 分别声明核算口径，再使用相对基线的目标或有文档依据的 roofline 分析。 |
+| 候选比较 | 使用相同节点、设备数和实测步数；排除约定的预热，并连续运行。 |
 
-Set targets through `training.mfu.target_*` and inspect the final
-acceptance output. See
-[MFU targets](../../perf-playbook/references/mfu-targets.md).
+通过 `training.mfu.target_*` 设置目标，并检查最终验收输出，参见 [MFU 目标](../../perf-playbook/references/mfu-targets.md)。
 
-When a result differs from the baseline expectation, verify accounting and
-configuration equivalence before investigating hardware or implementation
-faults.
+结果偏离基线预期时，先核查核算方式和配置等价性，再调查硬件或实现问题。
 
-### Failure Modes
+<a id="failure-modes"></a>
+### 失败模式
 
-| Symptom | Likely Cause | Recipe Adjustment |
+| 症状 | 可能原因 | Recipe 调整 |
 |---------|--------------|-------------------|
-| OOM at step 1-5 | Model states too large | Enable FSDP level3, reduce micro-batch |
-| OOM at step 15+ | Activation accumulation | Enable activation checkpoint |
-| Throughput < 50% expected | Communication bottleneck | Reduce TP/CP, check network |
-| Loss = NaN | Numerical instability | Lower LR, check mixed precision |
-| Hang at init | Mesh config mismatch | Verify dp×tp×pp×cp×ep = device_count |
+| 第 1～5 步 OOM | 模型状态过大 | 启用 FSDP level3，减小微批 |
+| 第 15 步后 OOM | 激活累积 | 启用激活检查点 |
+| 吞吐低于预期的 50% | 通信瓶颈 | 减小 TP/CP，检查网络 |
+| Loss = NaN | 数值不稳定 | 降低学习率，检查混合精度 |
+| 初始化挂起 | Mesh 配置不匹配 | 检查 dp×tp×pp×cp×ep = device_count |
 
-## Recipe Selection Guide
+<a id="recipe-selection-guide"></a>
+## Recipe 选择指南
 
 ```python
 def select_recipe(model_size_b, device_count, validation_depth):
@@ -287,9 +293,10 @@ def select_recipe(model_size_b, device_count, validation_depth):
     }
 ```
 
-## Multi-Candidate Recipe
+<a id="multi-candidate-recipe"></a>
+## 多候选 Recipe
 
-When validating Top-3 strategies sequentially:
+依次验证前三个策略时：
 
 ```bash
 #!/bin/bash
@@ -326,21 +333,22 @@ done
 python compare_candidates.py metrics_candidate*.json
 ```
 
-## Validation Checklist
+<a id="validation-checklist"></a>
+## 验证清单
 
-Before running benchmark:
+基准测试前：
 
-- [ ] Model checkpoint accessible
-- [ ] Devices available (via `npu-smi` / `nvidia-smi`)
-- [ ] Config matches PSA strategy (dp×tp×pp×cp×ep = device_count)
-- [ ] Sufficient disk space (~100 MB for logs)
-- [ ] No conflicting processes
-- [ ] Recipe parameters match validation goal (fast/standard/full)
+- [ ] 模型检查点可访问
+- [ ] 通过 `npu-smi` / `nvidia-smi` 确认设备可用
+- [ ] 配置与 PSA 策略一致，dp×tp×pp×cp×ep = device_count
+- [ ] 磁盘空间充足，日志约需 100 MB
+- [ ] 没有冲突进程
+- [ ] Recipe 参数与验证目标一致：快速、标准或完整
 
-After benchmark:
+基准测试后：
 
-- [ ] All steps completed (no OOM/hang)
-- [ ] Logs contain throughput lines
-- [ ] Memory metrics logged
-- [ ] Profiler traces written (if enabled)
-- [ ] Exit code 0
+- [ ] 所有步骤完成，没有 OOM 或挂起
+- [ ] 日志包含吞吐记录
+- [ ] 已记录显存指标
+- [ ] 启用 profiler 时已写出追踪
+- [ ] 退出码为 0

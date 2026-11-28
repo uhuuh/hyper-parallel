@@ -1,88 +1,33 @@
-# Reusing the training acceptance protocol
+<a id="reusing-the-training-acceptance-protocol"></a>
+# 复用训练验收协议
 
-Reuse the validation layers established by the Qwen3 MFU confirmation runs. Preserve
-the method when adapting another model, rather than hard-coding model-specific constants.
+复用 Qwen3 MFU 确认实验中建立的分层验证方法。适配其他模型时应保留方法，而不是硬编码模型专属常量。
 
-1. Every node launcher must exit successfully and every rank must finish the planned
-   steps. Verify the loaded checkpoint or reproducibly initialized parameters on all ranks.
-   Across layouts, verify logical parameter identity and equal replicated shards;
-   the same random seed is insufficient. See the
-   [initialization and regression procedure](../../perf-playbook/references/failure-repair.md).
-2. Freeze source, configuration, data, and the actual environment. Before importing
-   training modules, each worker computes the declared source-manifest digest and records
-   its editable-install/import path. Independently compute and compare the actual digest;
-   echoing an expected remote digest is not verification. Include imported
-   adapter modules and their recipe files, and verify the resolved factory
-   before launch when the job adds adapter-specific overrides.
-3. Match input tokens/hashes, actual batches and sequence lengths, masks, and the
-   declared routing mode. Keep global tokens and useful model FLOPs unchanged and audit MFU independently
-   per step. Exclude padding, redundant fused work, and recomputation from MFU. Device peak
-   throughput comes from an external specification or an explicit task parameter, not
-   a guessed script default.
-   For ordinary causal attention, count `sum(L * (L + 1) / 2)` valid query--key pairs
-   over the independent segments in each physical row. For sliding-window, sparse,
-   or compressed attention, count the visible keys per query on each active layer.
-   Count active MoE expert and router work, and audit recurrent blocks separately
-   from softmax attention. When the objective supervises only part of a sequence,
-   count the vocabulary projection work for the supervised positions. Use this same
-   objective work for a reference that projects every row and an equivalent candidate
-   that projects only the supervised subset.
-   Check packing against separate rows at fixed tokens and model semantics. Before
-   timing either path, test a masked cross-segment dependency against the reference
-   at the actual attention call site. A boolean keep mask requires conversion
-   when passed to an implementation that expects additive attention bias.
-   Freeze this component breakdown before comparing candidates. A Trainer's
-   full-square estimate can be retained for historical replay. Use the independent
-   useful-work audit for the target when the two metrics differ. Recount the baseline
-   and every candidate over their original windows when adopting a new convention.
-   Across sequence or batch choices, report effective tokens/s/device and peak memory
-   alongside the declared model FLOPs. Use a same-workload reference to attribute an
-   implementation speedup.
-   For multimodal packing, verify text sequence isolation independently of
-   spatial rotary positions. Reconstruct image/video encoder and projector
-   work from runtime patch grids and attention windows on every source rank.
-   Compare against separate-sample outputs and gradients before timing.
-   When eliminating a square mask, validate the runtime geometry and the
-   backend's implicit causal contract before timing. A/B compares mask
-   semantics at the real call site. Include a matched A/A trajectory when
-   numerical variation can affect the gate. Keep the original verdict if a
-   later replay adds evidence at a different scope.
-   If a candidate introduces derived projection or layout metadata, compare
-   all logical tensors at the last common boundary, including media values.
-   In trajectory mode, hash the public batch and loss inputs before a
-   model-integrated loss prepares its execution arguments. Verify the actual
-   forward fields, operator shapes, and rank coverage independently. For
-   adapters that derive metadata earlier, compare the logical tensors at a
-   shared boundary before either adapter derives the fields.
-4. Check finite loss and gradients and compare input, loss, and gradient-norm trajectories.
-   Check bitwise equivalence directly where applicable. When fusion changes rounding,
-   declare tolerances in advance, validate module forward outputs and all input/parameter
-   gradients, then check whole-model scalar trajectories. **Matching loss and gradient
-   norms does not prove elementwise gradient equality.** Use [precision](../../precision/SKILL.md)
-   or [hf-model-precision-validation](../../hf-model-precision-validation/SKILL.md).
-   For MoE dispatch/combine, also use [routing-validator](../../routing-validator/SKILL.md).
-5. Prefer hardware counters for HFU. Account for the executed recomputation, optimizer,
-   and other arithmetic on the declared devices. Record step coverage and use the
-   matching unprofiled times. Label estimates and state their derivation.
-6. Positively verify the candidate path and declared shape coverage. Test the fallback
-   when the candidate introduces or changes one.
-7. Disable profiling during the formal benchmark. Fix the post-warmup window and use
-   the maximum complete-step duration across ranks. Declare timing boundaries for the
-   optimizer, input pipeline, synchronization, and logging. Use a separate short profile
-   to explain the mechanism.
-   Record device occupancy at admission and verify isolation during the run with a
-   lightweight out-of-band check. A process outside the trial appearing on a measured
-   device invalidates that run's resource conditions. Retain its logs and repeat on
-   isolated resources. Cancel only workers whose ownership by the trial is verified.
+1. 每个节点的启动器都必须成功退出，每个 rank 都必须完成计划步数。在所有 rank 上验证已加载的检查点或可复现初始化的参数。跨布局时，验证逻辑参数一致性，以及复制分片彼此相等；仅有相同随机种子并不足够。参见[初始化与回归流程](../../perf-playbook/references/failure-repair.md)。
+2. 冻结源码、配置、数据和实际环境。每个工作进程在导入训练模块之前，都应计算声明的源码清单摘要，并记录 editable 安装或导入路径。必须独立计算并比较实际摘要；原样输出预期的远端摘要不算验证。将导入的适配器模块及其 Recipe 文件纳入范围；作业增加适配器专属覆盖项时，在启动前验证解析后的工厂函数。
+3. 对齐输入 token/哈希、实际批量与序列长度、掩码和声明的路由模式。保持全局 token 数和有效模型 FLOPs 不变，并逐步独立核查 MFU。MFU 不计入填充、融合中的冗余工作和重计算。设备峰值吞吐应来自外部规格或明确的任务参数，不能使用脚本猜测的默认值。
 
-The earlier `analyze.py` validated rank-steps, weight loading, input hashes, FLOPs, Muon
-invocation shapes, and recomputed layer counts. An adapted version can serve as this
-controller's `validate` command while retaining raw JSONL validation. Do not copy a PASS
-from an old `results.json` into a new trial. Configure model-specific loading markers,
-FLOP accounting, and numerical checks instead of reusing Qwen parameter or layer counts.
+   对普通因果注意力，按每个物理行中的独立片段，计算 `sum(L * (L + 1) / 2)` 个有效 query–key 对。对于滑动窗口、稀疏或压缩注意力，应在每个实际参与计算的层上，统计每个 query 可见的 key。统计实际参与的 MoE 专家和路由器工作量，并将循环块与 softmax 注意力分开核算。目标函数只监督序列的一部分时，只统计受监督位置的词表投影工作。对于投影所有行的参考实现，以及只投影受监督子集的等价候选，使用同一目标函数对应的工作量。
 
-Reuse the relevant checks on existing per-rank JSONL records with
-`scripts/audit_rank_steps.py`.
+   在 token 数和模型语义固定的条件下，将打包输入与分行输入比较。对任一路径计时前，在真实注意力调用点，与参考实现对照测试被掩码阻断的跨片段依赖。将布尔保留掩码传给要求加性注意力偏置的实现时，必须进行转换。
+
+   比较候选前，冻结这份分解口径。Trainer 的完整方阵估算可以保留用于历史重跑；两种指标不同时，目标应采用独立的有效工作量核算。采用新口径时，必须在各自原始窗口上重新核算基线和每个候选。比较不同序列长度或批量时，除声明的模型 FLOPs 外，还应报告有效 tokens/s/device 和峰值显存。归因实现加速时，应使用相同工作负载的参考。
+
+   对多模态打包，应独立于空间旋转位置检查文本序列隔离。根据每个源 rank 的运行时 patch 网格和注意力窗口，重建图像/视频编码器及投影器的工作量。计时前，与逐样本执行的输出和梯度比较。
+
+   消除方形掩码时，先验证运行时几何结构和后端隐式因果契约，再计时。A/B 在真实调用点比较掩码语义。数值波动可能影响门禁时，应提供条件匹配的 A/A 轨迹。如果后续重跑在不同范围补充证据，应保留原判定。
+
+   候选引入派生投影或布局元数据时，在最后一个共同边界比较所有逻辑张量，包括媒体值。在轨迹模式下，在模型集成的损失函数准备执行参数之前，对公开批次及损失输入计算哈希。独立检查实际前向字段、算子形状和 rank 覆盖。适配器更早派生元数据时，应在任一适配器派生字段之前的共同边界比较逻辑张量。
+4. 检查 loss 和梯度是否有限，并比较输入、loss 和梯度范数轨迹。适用时直接检查逐位等价。融合改变舍入时，提前声明容差，验证模块前向输出及所有输入/参数梯度，再检查整模型标量轨迹。**loss 和梯度范数一致，不代表逐元素梯度相等。** 使用 [precision](../../precision/SKILL.md) 或 [hf-model-precision-validation](../../hf-model-precision-validation/SKILL.md)。MoE dispatch/combine 还应使用 [routing-validator](../../routing-validator/SKILL.md)。
+5. HFU 优先使用硬件计数器。核算声明设备上实际执行的重计算、优化器及其他算术工作。记录步骤覆盖情况，并使用匹配的、未启用 profiler 的计时。估算值应明确标注并说明推导过程。
+6. 通过正向证据验证候选路径实际生效，并覆盖声明的形状。候选引入或修改回退路径时，还应测试回退行为。
+7. 正式基准测量时关闭 profiler。固定预热后窗口，并使用跨 rank 的完整训练步最大耗时。声明优化器、输入流水线、同步和日志的计时边界。使用独立的短性能采集解释优化机制。
+
+   准入时记录设备占用，运行期间通过轻量的带外检查验证资源隔离。测量设备上出现不属于本轮实验的进程，会使该次运行的资源条件失效。保留日志，并在资源隔离后重跑。只取消已确认属于本轮实验的工作进程。
+
+早期的 `analyze.py` 验证了 rank 与步骤、权重加载、输入哈希、FLOPs、Muon 调用形状和重计算层数。适配后的版本可以作为本控制器的 `validate` 命令，同时保留对原始 JSONL 的验证。不要将旧 `results.json` 中的 PASS 复制到新实验。应配置模型专属的加载标记、FLOP 核算和数值检查，不要复用 Qwen 的参数量或层数。
+
+使用 `scripts/audit_rank_steps.py`，对现有的逐 rank JSONL 记录复用相关检查。
 
 ```bash
 python .agent/skills/mfu-riser/scripts/audit_rank_steps.py \
@@ -92,81 +37,36 @@ python .agent/skills/mfu-riser/scripts/audit_rank_steps.py \
   --out /path/to/trial/rank-audit.json
 ```
 
-`independent-work.json` contains `derivation`, `source`, and
-`samples: [{step, model_tokens, model_flops}, ...]` for all steps. Derive it independently
-from the model architecture, weight shapes, and actual sequence lengths, never by
-inverting recorded MFU. Exported samples can populate the final measurement.
-`unverified` lists remaining checks such as weight loading, module gradients, engagement,
-and environment. Scalar comparisons default to bitwise equality; declare any tolerance
-before freezing the run configuration. Without a reference, `parity=null`.
+`independent-work.json` 包含 `derivation`、`source`，以及覆盖所有步骤的 `samples: [{step, model_tokens, model_flops}, ...]`。这些值应根据模型架构、权重形状和实际序列长度独立推导，绝不能通过已记录的 MFU 反推。导出的样本可以填入最终测量结果。
+`unverified` 列出尚未完成的检查，例如权重加载、模块梯度、路径生效和环境检查。标量比较默认要求逐位相等；任何容差都必须在冻结运行配置之前声明。没有参考时，`parity=null`。
 
-For accumulated training, pass `--microbatches-per-update` with the count derived
-from the frozen schedule. Each update's `input_hashes` list must contain one ordered
-entry per microbatch, covering tokens, masks and positions; its meter `batches` must
-have the same count. Both candidate and reference are checked even when their
-truncated hashes match. Without the option, microbatch coverage remains explicitly
-unverified. Count optimizer updates and microbatches separately in other adapters too.
+对梯度累积训练，传入 `--microbatches-per-update`，其值应根据冻结的调度推导。每次更新的 `input_hashes` 列表必须按顺序为每个微批提供一条记录，覆盖 token、掩码和位置；计量记录中的 `batches` 数量必须相同。即使候选与参考的截断哈希一致，也要检查双方。不提供该选项时，微批覆盖情况会明确保留为未验证。其他适配器也应将优化器更新次数和微批数量分开统计。
 
-## Screening and acceptance
+<a id="screening-and-acceptance"></a>
+## 筛选与验收
 
-For a performance-first task, set the validation level before running experiments.
-Screening can use fewer post-warmup steps and a focused implementation gate. Test
-the actual shapes, forward outputs, gradients, update semantics, and relevant
-distributed reductions. Choose the scope according to the changed path.
-Confirm workload identity, input validity, all-rank completion, and engagement in
-every trial.
+性能优先的任务应在实验前设定验证级别。筛选可以使用较少的预热后步骤和聚焦于实现的门禁。测试实际形状、前向输出、梯度、更新语义和相关分布式归约，根据修改路径选择范围。每轮实验都必须确认工作负载一致、输入有效、所有 rank 完成，以及路径实际生效。
 
-For acceptance, use the declared full numerical gate and the frozen screened
-candidate. Cover equivalent parameter updates and model-level behavior with
-predeclared tolerances. Capture fixed-routing and learned-routing evidence in
-their declared workloads. Use learned routing to accept a learned training policy.
+验收时，使用声明的完整数值门禁和冻结的筛选候选，按预先声明的容差覆盖等价参数更新及模型级行为。在各自声明的工作负载下采集固定路由和学习路由证据。验收学习式训练策略时，应使用学习路由。
 
-For projection packing, check the optimizer on the original logical parameter
-boundaries. A fused Gate/Up projection can preserve forward outputs and gradients
-while changing the matrix used by Muon. Compare an update starting from the same
-weights, gradients, and momentum. When the reference orthogonalizes the two
-projections independently, preserve both their Newton--Schulz inputs and RMS
-scales. If the runtime provides a logical-matrix view hook, verify that it is
-invoked for the packed weights. Check the resulting updates after unpacking,
-then run the original model-level gate.
+对投影打包，应按原始逻辑参数边界检查优化器。融合的 Gate/Up 投影可能保留前向输出和梯度，却改变 Muon 处理的矩阵。比较从相同权重、梯度和动量出发的一次更新。参考实现分别对两个投影做正交化时，应同时保留它们各自的 Newton–Schulz 输入和 RMS 缩放。运行时提供逻辑矩阵视图钩子时，验证打包权重确实调用了该钩子。解包后检查更新结果，再运行原始模型级门禁。
 
-## Five-stage adapter
+<a id="five-stage-adapter"></a>
+## 五阶段适配器
 
-- `precheck`: Check resource availability, version/shape/backward support, numerical
-  parity, fallback behavior, and candidate applicability.
-- `benchmark`: Reuse the distributed launcher, wait for all remote tasks to exit, and
-  record actual runtime and step evidence. Write artifacts to `RISER_TRIAL_DIR` with
-  the unique trial token.
-- `profile`: Run a separate short capture with the same source and configuration, then
-  call `python .agent/skills/mfu-riser/scripts/collect_state.py --prof-dir ... --out ...`.
-- `validate`: Check the raw evidence above and emit the contract's `measurement.json`.
-  Failed validation must return a nonzero exit code, not just a warning.
-- `cleanup`: Run after success or failure. Inspect and clean up only **this trial's**
-  remote workers. Do not use broad `pkill` commands or terminate another user's training.
-  Return zero when already stopped; return nonzero if cleanup cannot be confirmed.
+- `precheck`：检查资源可用性、版本/形状/反向支持、数值一致性、回退行为和候选适用性。
+- `benchmark`：复用分布式启动器，等待所有远端任务退出，记录实际运行时间和逐步证据。将带有唯一实验 token 的产物写入 `RISER_TRIAL_DIR`。
+- `profile`：使用相同源码和配置，独立进行短性能采集，然后调用 `python .agent/skills/mfu-riser/scripts/collect_state.py --prof-dir ... --out ...`。
+- `validate`：检查上述原始证据，并输出协议规定的 `measurement.json`。验证失败必须返回非零退出码，不能只打印警告。
+- `cleanup`：成功或失败后都执行。只检查并清理**本轮实验**的远端工作进程。不得使用范围过宽的 `pkill` 命令，也不得终止其他用户的训练。进程已经停止时返回零；无法确认清理完成时返回非零。
 
-The controller freezes argv and `validator_files`; it does not replace domain checks.
-A JSON `passed=true` is not a mathematical proof. Include validators and their dependencies
-in `validator_files`, and source and configuration files in `source_paths`. Preserve
-independent check inputs, raw evidence, and results in the trial directory.
+控制器冻结 argv 和 `validator_files`，但不替代领域检查。JSON 中的 `passed=true` 不是数学证明。将验证器及其依赖纳入 `validator_files`，将源码和配置文件纳入 `source_paths`。在实验目录中保留独立检查的输入、原始证据和结果。
 
-## Retention and stopping
+<a id="retention-and-stopping"></a>
+## 保留与停止
 
-Record `keep` only when MFU, computed from total model FLOPs divided by total time,
-improves over the current best by more than the predeclared relative noise threshold.
-A retained trial is a selected candidate. A screening result at the target leads to
-a [linked acceptance series](contracts.md#linked-series). Target acceptance requires
-an independent run with identical source and configuration that agrees within the
-noise band. Both acceptance runs must meet the target. The controller records
-confirmation variance outside the band as `unstable`.
+仅当 MFU（按模型总 FLOPs 除以总时间计算）相对当前最佳结果的提升超过预先声明的相对噪声阈值时，才记录为 `keep`。保留实验表示选中了一个候选。筛选结果达标后，进入[关联验收序列](contracts.md#linked-series)。目标验收要求在相同源码和配置下独立运行一次，结果与前次的差异处于噪声区间内。两次验收运行都必须达到目标。确认结果的偏差超出噪声区间时，控制器记录为 `unstable`。
 
-For gains near the noise threshold, calibrate A/A variation and repeat within the
-remaining budget. The v1 fixed noise band is not a statistical-significance test, and
-50 adjacent steps are not 50 independent experiments.
+收益接近噪声阈值时，校准 A/A 波动，并在剩余预算内复测。v1 的固定噪声区间不是统计显著性检验，连续 50 步也不等于 50 次独立实验。
 
-Each `init` fixes the budget. Candidate, confirmation, and crashed trials share
-`max_trials`, excluding the baseline. `max_seconds` is wall-clock time from initialization,
-including planning. A timeout terminates the local process group and invokes job-specific
-cleanup, with up to 30 additional seconds for resource release. Failed cleanup leaves a
-pending trial and blocks further trials until `recover` succeeds. On stopping, retain
-the best result without automatically publishing or overwriting code.
+每次 `init` 都会固定预算。候选、确认和崩溃实验共用 `max_trials`，基线不计入其中。`max_seconds` 从初始化时开始按墙钟计时，包含规划时间。超时会终止本地进程组，并调用作业专属清理，额外最多允许 30 秒释放资源。清理失败会使实验保持待处理状态，并阻止后续实验，直到 `recover` 成功。停止时保留最佳结果，不自动发布或覆盖代码。
