@@ -1,0 +1,607 @@
+
+
+autoresearch
+- 固定时间优化模型能力
+- 将代码分为可变部分和不可变部分，只允许模型修改可变部分
+- 首次执行确认基线
+- 每次修改作为一个commit，然后测试，根据测试结果继续下一轮，或者回退当前commit
+- 同时将每次迭代详情写入到一个文件中
+
+
+HyperParallel 模型适配流程 S0～S6
+================================
+
+整理依据
+
+- 当前代码版本为 f8572d71，refactor(agent): isolate the RSI workflow under .agent。
+- 总入口为 .agent/skills/hf-model-integration/SKILL.md。
+- 该文件 Bring-up stage machine 表是阶段划分、交接产物和退出条件的依据。
+- 下文的普通函数名、对象字段和调用顺序是便于阅读的伪代码组织。
+- 每阶段先列阶段表直接要求，再给伪代码、引用展开及对应文件。
+- 所有路径相对仓库根目录。代码块是流程说明，执行时以实际脚本参数为准。
+
+动作约定
+
+普通函数(输入) -> Agent 完成分析、编写、配置、检查等任务，返回结果。
+SKILL(名称, 输入) -> 按指定 Skill 执行，返回其产物。
+READ(路径, sections=章节) -> 阅读参考资料、模板或已有产物。
+SCRIPT(路径, 参数) -> 执行脚本，取得退出码、输出及产物路径。
+ASK(问题, 选项) -> 等待用户决定。
+WRITE(路径, 内容) -> 持久化内容，返回文件路径。
+SPAWN(任务, 输入) / WAIT(句柄) -> 委派任务及等待结果。
+
+SPAWN/WAIT 是描述可选执行组织的符号。当前阶段表没有要求各阶段必须使用子 Agent。
+if、for、while 表达控制流程。检查函数可返回缺失项列表，空列表表示通过。
+return 将结果交给调用方，WRITE 将产物写入存储，两者可以使用同一份内容。
+函数返回的逻辑对象可以包含实际文件路径。对象字段不代表脚本原本就返回同名 JSON。
+SKILL 的输入表示任务和范围，具体执行过程需继续遵循该 Skill 的正文。
+每阶段持久化产物的实际路径由运行配置确定，这里不规定额外的中文文件名。
+
+主流程
+
+fun 模型适配(任务, 运行目录) {
+    // 主 Skill 要求按顺序推进，阶段产物作为下一阶段的接口。
+    // 恢复时读取运行目录，定位第一个缺失的阶段产物，并核对当前资产版本。
+    S0结果 = S0_调研规划(任务)
+    if S0结果.状态 != "PASS" { return S0结果 }
+    WRITE(任务.阶段产物路径.S0, S0结果)
+
+    S1结果 = S1_适配实现(任务, S0结果.迁移规格)
+    if S1结果.状态 != "PASS" { return S1结果 }
+    WRITE(任务.阶段产物路径.S1, S1结果)
+
+    S2结果 = S2_单节点正确性(任务, S0结果, S1结果)
+    if S2结果.状态 != "PASS" { return S2结果 }
+    WRITE(任务.阶段产物路径.S2, S2结果)
+
+    S3结果 = S3_分布式等价(任务, S0结果, S1结果, S2结果)
+    if S3结果.状态 != "PASS" { return S3结果 }
+    WRITE(任务.阶段产物路径.S3, S3结果)
+
+    S4结果 = S4_分析与优化(任务, S1结果, S3结果)
+    if S4结果.状态 != "PASS" { return S4结果 }
+    WRITE(任务.阶段产物路径.S4, S4结果)
+
+    S5结果 = S5_验收集成(任务, S0结果, S1结果, S3结果, S4结果)
+    WRITE(任务.阶段产物路径.S5, S5结果)
+    if S5结果.状态 != "PASS" { return S5结果 }
+
+    if 任务.要求形式验证 {
+        S6结果 = S6_形式验证(任务, S5结果)
+        WRITE(任务.阶段产物路径.S6, S6结果)
+        return { 验收交付: S5结果, 形式验证: S6结果 }
+    }
+    return S5结果
+}
+
+S0～S5 按阶段推进，S6 是原阶段表中的可选形式验证阶段。
+WRITE 记录的是已执行步骤的产物及其引用，不会将未运行步骤标为通过。
+
+
+S0 调研规划
+============
+
+阶段表直接要求
+
+- 使用本 Skill 的 bringup-field-checklist.md §1～§3，以及 parallel-strategy-analyzer。
+- 产物为迁移规格，包含结构表、硬件与依赖概况、并行计划、风险清单。
+- 硬件与依赖概况使用 templates/environment-profile.md。
+- 退出条件为规格完整，每项无先例语义均已标记待上报。
+
+fun S0_调研规划(任务) {
+    清单 = READ(
+        ".agent/skills/hf-model-integration/references/bringup-field-checklist.md",
+        sections=[1, 2, 3]
+    )
+    环境模板 = READ(
+        ".agent/skills/hf-model-integration/templates/environment-profile.md"
+    )
+
+    // 以下动作展开自清单 §1～§3。
+    模型来源 = 阅读并固定模型源码和依赖版本(任务, 清单)
+    权重结构 = 推导发布权重名称和结构(模型来源, 清单)
+    语义差异 = 识别通用模块未覆盖的模型语义(模型来源, 清单)
+    硬件信息 = 只读调查硬件并记录探测来源(任务.目标环境, 清单)
+    已有权重 = 清点已有权重并核验完整性(任务.允许搜索位置, 清单)
+    依赖概况 = 调查依赖版本和覆盖需求(模型来源, 任务.目标环境, 清单)
+    结构表 = 整理模型结构表(模型来源, 权重结构, 语义差异)
+    环境概况 = 填写模板(环境模板, 硬件信息, 依赖概况)
+
+    并行计划 = SKILL(
+        "parallel-strategy-analyzer",
+        { 结构表, 环境概况, 任务.并行要求, 任务.序列长度, 任务.全局批量 }
+    )
+
+    风险清单 = 汇总风险(语义差异, 已有权重, 依赖概况, 并行计划)
+    待上报语义 = 标记无先例语义(语义差异)
+    迁移规格 = {
+        模型来源, 结构表, 环境概况, 已有权重,
+        并行计划, 风险清单, 待上报语义
+    }
+
+    缺失项 = 检查规格完整性及无先例语义标记(迁移规格)
+    return {
+        状态: if 缺失项.为空 "PASS" else "BLOCKED",
+        迁移规格, 缺失项
+    }
+}
+
+原文与实际位置
+
+- .agent/skills/hf-model-integration/SKILL.md，S0 行及 Workflow 第 1 步。
+- references/bringup-field-checklist.md §1，固定版本源码、权重目录、未覆盖语义、只读硬件调查。
+- 同一清单 §2，已有权重清点、大小校验及获取方式。
+- 同一清单 §3，依赖覆盖、平台 wheel、模态依赖和实际导入路径。
+- templates/environment-profile.md，环境概况字段和探测来源。
+- .agent/skills/parallel-strategy-analyzer/SKILL.md，依次引用 workflows/01-collect-model-info.md、02-global-baseline.md、03-strategy-search.md、04-cost-analysis.md、05-scoring-output.md。
+
+并行分析 Skill 返回基线、推荐组合、DeviceMesh 示例、分片后显存、通信、气泡、显存建议和三个备选方案。
+这些是规划估算，后续设备实验产生实测证据。
+若实际需要下载权重，主 Skill 的 Workflow 第 1 步要求先询问保存目录并获得下载授权。
+这项授权属于执行下载时的条件动作，S0 阶段表本身要求记录权重状态和风险。
+S0 的“标记待上报”与“已取得设计决定”分别记录，不能混写。
+
+
+S1 适配实现
+============
+
+阶段表直接要求
+
+- 使用本 Skill、add-unit-test、feature-doc†。
+- 产物为通用工具包上的 recipe，需要 provider 才提供适配器。
+- 发布布局检查使用清单 §5 的脚本，退出码为 0，并声明 full-shape 或 names-only 覆盖。
+- 退出条件为布局检查通过，适用的家族测试通过。
+
+fun S1_适配实现(任务, 迁移规格) {
+    // 关联参考来自主 Skill 的 Load 要求和清单 §4。
+    // S1 行直接指定的清单章节是 §5。
+    构建说明 = READ(
+        ".agent/skills/hf-model-integration/references/bringup-field-checklist.md",
+        sections=[4]
+    )
+    布局说明 = READ(
+        ".agent/skills/hf-model-integration/references/bringup-field-checklist.md",
+        sections=[5]
+    )
+
+    工具包配置 = 配置通用模型构建和训练Recipe(迁移规格, 构建说明)
+    需要Provider = 判断任务所需能力是否需要模型专属扩展(迁移规格, 工具包配置)
+    适配器 = None
+
+    if 需要Provider {
+        分析指南 = READ(
+            ".agent/skills/hf-model-integration/references/model-analysis-and-adapter.md"
+        )
+        适配器 = 实现所需的模型适配器(迁移规格, 分析指南)
+    }
+
+    测试 = SKILL("add-unit-test", { 迁移规格, 工具包配置, 适配器 })
+    文档 = SKILL("feature-doc", { 迁移规格, 工具包配置, 适配器 })
+
+    布局检查 = SCRIPT(
+        ".agent/skills/hf-model-integration/scripts/check_released_layout.py",
+        ["--model-dir", 任务.模型目录]
+    )
+    覆盖说明 = 从检查输出记录完整形状或仅名称覆盖(布局检查)
+    家族测试结果 = 运行适用的家族测试(测试, 工具包配置, 适配器)
+
+    return {
+        状态: if 布局检查.退出码 == 0 && 家族测试结果.通过 "PASS" else "BLOCKED",
+        工具包配置, 适配器, 测试, 文档, 布局检查, 覆盖说明, 家族测试结果
+    }
+}
+
+Provider 的含义和条件
+
+- 当前实现位于 hyper_parallel/models/adapter_spec.py 的 ModelAdapterSpec。
+- 通用构建与规划已覆盖需求时可以走 HF 原生零注册路线。
+- 模型专属分片规则对应 sharding_rules。
+- 模型专属模块替换与权重转换对应 replacements。
+- 模型专属序列或专家通信对应 context_parallel、expert_parallel。
+- 特殊 FSDP 包装、排除和执行顺序对应 fsdp_wrap_modules、fsdp_excluded_subtrees、fsdp_execution_order。
+- 专属重计算和 loss 适配对应 recompute、loss。
+- 启用某个并行维度时，要检查该模型语义是否已被通用实现或 recipe 覆盖。
+
+实际配置与脚本
+
+- .agent/examples/hf_text_bringup/build_model.py，build_hf_causal_lm() 是通用文本模型构建入口。
+- .agent/examples/hf_text_bringup/train_hf_text.yaml，model._target_ 指向上述构建函数。
+- .agent/skills/hf-model-integration/scripts/check_released_layout.py，比较发布名称、形状及共享别名，报告形状覆盖。
+- .agent/examples/hf_text_bringup/reproduce/reproduce.sh 的 stage_s1() 调用布局检查和 check_tied_save.py。
+- check_tied_save.py 是清单 §5b 的共享权重保存预检。主 Skill 还在 S0/S1 成本检查的说明中引用它。
+- .agent/skills/add-unit-test/SKILL.md 是单测编写入口。
+- .agent/skills/feature-doc/SKILL.md 使用其 templates/feature-design-doc.md。
+- 本 Skill 的 Workflow 还提供 inspect、scaffold、check 命令。新家族及自定义适配按对应条目执行。
+- CLI 统一入口为 python -m hyper_parallel.tools.model_integration，实现在 hyper_parallel/tools/model_integration/cli.py。
+
+
+S2 单节点正确性
+================
+
+阶段表直接要求
+
+- 使用清单 §6、hf-model-precision-validation。
+- 与普通 HF 构建做同进程逐位比较，保存报告，并保存训练冒烟 loss 曲线。
+- 零注册路线用该报告替代 integration_handoff.yaml，作为进入 S3 的前置证据。
+- 退出条件为前向一致，loss 有限且下降。
+
+fun S2_单节点正确性(任务, S0结果, S1结果) {
+    首轮检查 = READ(
+        ".agent/skills/hf-model-integration/references/bringup-field-checklist.md",
+        sections=[6]
+    )
+    真实权重冒烟 = 检查真实权重加载前向和生成(任务, S1结果, 首轮检查)
+
+    if 任务.模型属于通用比较脚本支持范围 {
+        同进程比较 = SCRIPT(
+            ".agent/examples/hf_text_bringup/reproduce/parity_check.py",
+            任务.同进程比较参数
+        )
+        // 脚本对比参数、缓冲区和 logits，报告含每项差异。
+        // 参数中指定 --model-dir、--dtype、--output 等实际支持的选项。
+    } else {
+        同进程比较 = 按清单执行并持久化真实构建路径的逐位比较(
+            任务, S0结果.迁移规格.模型来源, S1结果
+        )
+        // 通用工具包以外的模型需选择适用的参考和比较入口，记录覆盖范围。
+    }
+
+    模块验证 = None
+    if S1结果.适配器 != None {
+        模块验证 = SKILL(
+            "hf-model-precision-validation",
+            { 范围: "模块一致性", 参考实现: S0结果.迁移规格.模型来源, 候选: S1结果 }
+        )
+        交接证据 = 模块验证.integration_handoff及引用报告
+    } else {
+        交接证据 = 同进程比较.报告路径
+    }
+
+    冒烟结果 = 运行单节点训练冒烟(S1结果.工具包配置, 首轮检查)
+    缺失项 = 检查前向一致及Loss有限且下降(
+        同进程比较, 模块验证, 冒烟结果
+    )
+
+    return {
+        状态: if 缺失项.为空 "PASS" else "BLOCKED",
+        真实权重冒烟, 同进程比较, 模块验证, 交接证据, 冒烟结果, 缺失项
+    }
+}
+
+关联 Skill 和实际产物
+
+- .agent/skills/hf-model-precision-validation/SKILL.md。
+- .agent/examples/hf_text_bringup/reproduce/parity_check.py，走真实构建路径比较参数、缓冲及 logits。
+- .agent/examples/hf_text_bringup/prepare_text_data.py，生成工具包所用的确定性合成文本。
+- .agent/examples/hf_text_bringup/run_hf_text.sh，单节点启动器。
+- .agent/examples/hf_text_bringup/reproduce/reproduce.sh，stage_s2a() 执行同进程比较，stage_s2b() 执行训练冒烟。
+- 注册路线的模块验证可使用 model_integration parity --manifest ... --device cpu --dtype float32，再按 Skill 检查生产 dtype。
+- 模块验证通过后写 integration_handoff.yaml，引用结构、模块一致性和检查点覆盖报告。
+- 零注册路线的交接报告由阶段表明确允许，具体执行器需选择支持该路线的入口。
+- 文本工具包的对比报告通常为 parity.json，另保留训练日志和 loss 曲线。
+- 多模态任务按清单 §6 和精度 Skill 的模态要求使用实际输入与对应构建路径。
+
+
+S3 分布式等价
+==============
+
+阶段表直接要求
+
+- 使用 hf-model-precision-validation、cluster-debug†。
+- 开启 model_integration.mode=runtime，使用全精度 loss、梯度范数及逐步全局输入哈希。
+- 重计算开关的比较、确定性重跑要求精确一致。
+- 跨布局从相同发布权重和 token-uniform 语料开始，早期步精确一致，记录分叉起点及增长。
+- 通用工具包 judge_equivalence.py 逐步委托 compare_scalar_curves 判定。
+- 退出条件为所有目标布局满足各自标准。
+
+fun S3_分布式等价(任务, S0结果, S1结果, S2结果) {
+    精度指南 = READ(".agent/skills/hf-model-precision-validation/SKILL.md")
+    交接检查 = 核验S2交接证据及引用文件(S2结果.交接证据)
+    if !交接检查.通过 {
+        return { 状态: "BLOCKED", 缺失项: 交接检查.缺失项 }
+    }
+
+    矩阵 = 制定目标布局重计算和重跑矩阵(S0结果.迁移规格, 精度指南)
+    比较条件 = 固定发布权重输入及运行证据设置(矩阵, 任务, 精度指南)
+
+    矩阵结果 = SKILL(
+        "hf-model-precision-validation",
+        { 范围: "分布式等价", 候选: S1结果, S2交接: S2结果, 矩阵, 比较条件 }
+    )
+
+    if 矩阵结果.存在分布式故障 {
+        诊断结果 = SKILL("cluster-debug", { 矩阵, 失败证据: 矩阵结果 })
+        return { 状态: "BLOCKED", 矩阵, 矩阵结果, 诊断结果 }
+        // 修复后的重跑需产生新证据，再检查受影响单元。
+    }
+
+    缺失项 = 检查所有目标布局及其比较证据(矩阵, 矩阵结果)
+    return {
+        状态: if 缺失项.为空 "PASS" else "BLOCKED",
+        矩阵, 比较条件, 矩阵结果, 缺失项
+    }
+}
+
+关联执行入口和产物
+
+- .agent/skills/hf-model-precision-validation/SKILL.md，执行前阅读其 references/matrix-acceptance.md 等对应资料。
+- 注册路线使用 model_integration validate --manifest ... --generate-only 生成矩阵，再用 validate 执行。
+- 实现在 hyper_parallel/tools/model_integration/cli.py、case_matrix.py、case_compare.py。
+- 精度 Skill 对正式矩阵要求至少十个连续对齐的优化器步骤，检查 loss 和全局 pre-clip grad_norm，同时检查输入和学习率。
+- 阶段表对跨布局早期精确一致及分叉记录另有要求，报告须分别说明采用的协议、步骤和比较精度。
+- 文本工具包使用 run_hf_text.sh、run_hf_text_dist.sh 启动各单元，judge_equivalence.py 比较证据。
+- .agent/examples/hf_text_bringup/judge_equivalence.py 支持 runtime 结构化证据。
+- .agent/examples/hf_text_bringup/reproduce/reproduce.sh 的 stage_s3() 提供已记录模型的复现单元。
+- 该复现脚本默认 S3_EVIDENCE=printed。满足当前阶段的结构化证据要求时需用 structured 路线，并验证实际产物。
+- .agent/skills/cluster-debug/SKILL.md 用于多 rank 故障诊断。
+- 产物包含等价矩阵、逐单元日志、metrics.jsonl、comparison.json，工具包判定记录可为 judge.txt。
+- CLI 矩阵还生成 cases/resolved_cases.json。无法运行单元需记录原因和覆盖缺口。
+
+
+S4 分析与优化
+==============
+
+阶段表直接要求
+
+- 使用 profiling†、memory-analysis†、训练 RSI 协议、autoresearch†。
+- 产物为通过检查的性能基线、瓶颈清单和候选实验凭据。
+- 分别记录性能目标，预算耗尽时解释剩余差距。
+
+fun S4_分析与优化(任务, S1结果, S3结果) {
+    协议 = READ(".agent/skills/perf-playbook/references/training-rsi.md")
+    实验条件 = 固定目标工作负载测量口径和预算(任务, S1结果, S3结果, 协议)
+
+    性能基线 = SKILL("profiling", { 训练入口: S1结果, 实验条件 })
+    显存分析 = SKILL("memory-analysis", { 训练入口: S1结果, 实验条件 })
+    瓶颈清单 = 分析性能和显存证据(性能基线, 显存分析)
+
+    // 关联展开来自 training-rsi.md 和 perf-playbook。
+    if 任务.要求端到端MFU优化 {
+        实验结果 = SKILL(
+            "mfu-riser",
+            { 实验条件, 性能基线, 显存分析, 瓶颈清单, 候选源码: S1结果 }
+        )
+    } else {
+        实验结果 = SKILL(
+            "autoresearch",
+            { 实验条件, 性能基线, 瓶颈清单, 目标文件: 任务.优化目标文件 }
+        )
+    }
+
+    目标记录 = 逐项目标记录结果及剩余差距(任务.性能目标, 实验结果)
+    缺失项 = 检查基线瓶颈凭据和目标记录完整性(性能基线, 瓶颈清单, 实验结果, 目标记录)
+    return {
+        状态: if 缺失项.为空 "PASS" else "BLOCKED",
+        性能基线, 显存分析, 瓶颈清单, 实验结果, 目标记录, 缺失项
+    }
+}
+
+S4 的 PASS 表示阶段证据和目标记录满足交接条件，实际达成情况由目标记录说明。
+mfu-riser 是通过训练 RSI 协议关联的实验入口，S4 表格直接列出的实验 Skill 是 autoresearch。
+
+关联 Skill 内部的实际调用
+
+1. profiling
+   入口为 .agent/skills/profiling/SKILL.md。
+   采集脚本为 .agent/skills/profiling/scripts/collect_prof.py。
+   分解脚本为 .agent/skills/profiling/scripts/breakdown.py。
+   Trainer 优先使用原生 profiling 配置，独立脚本可接 prof_hook.py。
+   返回原始追踪、采集完整性结果和性能分解 JSON/HTML。
+
+2. memory-analysis
+   入口为 .agent/skills/memory-analysis/SKILL.md。
+   采集脚本为 .agent/skills/memory-analysis/scripts/collect_snapshot.py。
+   挂钩为 .agent/skills/memory-analysis/scripts/mem_hook.py。
+   分解脚本为 .agent/skills/memory-analysis/scripts/breakdown.py。
+   返回快照、计数器旁车和显存分解 JSON/HTML。
+
+3. autoresearch
+   入口为 .agent/skills/autoresearch/SKILL.md。
+   控制器为 .agent/skills/autoresearch/scripts/autoresearch.py。
+   流程为 init -> baseline -> Agent 修改目标文件 -> iterate -> status -> 下一轮或结束。
+   iterate 执行提交、门禁、测量、keep/discard/crash 决策与记录。
+   discard/crash 用新的正向提交恢复目标文件，失败保留在历史中。
+   产物包括 run.json、manual.md、ideas.md、learnings.md、experiment_log.md、results.tsv、candidates.jsonl。
+
+4. mfu-riser
+   入口为 .agent/skills/mfu-riser/SKILL.md。
+   控制器为 .agent/skills/mfu-riser/scripts/mfu_riser.py。
+   Agent 准备 run.json、plan.json，控制器执行 init、trial、status、report。
+   每轮 trial 分为 precheck -> benchmark -> profile -> validate -> cleanup。
+   Agent 根据结果继续提出方案，筛选达标后进入验收序列并独立 confirm。
+   产物包括 controller.json、history.jsonl、各 trial 的源码快照、阶段日志、measurement.json、result.json、REPORT.md。
+
+5. 经验沉淀
+   两个控制器共用 .agent/scripts/rsi_learning.py。
+   默认 acceptance 在验收时整理，continuous 在完成实验并清理后整理。
+   Agent 复盘全部结果并填写 rsi/review.json，learn/finalize 调用共享工具检查证据和应用修改。
+   产物包括 RSI_REPORT.md、RSI_REPORT.html、rsi/report.json 和 .agent/learning/registry.json 的合格更新。
+   详细约定见 .agent/skills/autoresearch/references/experience-consolidation.md。
+
+
+S5 验收集成
+============
+
+阶段表直接要求
+
+- 使用 precision-acceptance 规则†、code-review。
+- autogit 和 gate-doctor 在提交操作获得授权后使用。
+- 产物为验收运行、报告、保存/恢复/续训记录，以及保留在本地的可审阅变更集。
+- 变更集包含提交、差异、单测与门禁证据摘要。
+- 退出条件为验收证据完整、修改可审阅、交付清单满足，并记录 held/authorized/submitted 状态。
+- 创建、更新或重触发 PR 是需要明确授权的独立步骤。
+
+fun S5_验收集成(任务, S0结果, S1结果, S3结果, S4结果) {
+    精度规则 = READ(".agent/rules/precision-acceptance.md")
+    交付清单 = READ(
+        ".agent/skills/hf-model-integration/references/migration-deliverables.md"
+    )
+    报告模板 = READ(
+        ".agent/skills/hf-model-integration/templates/migration-report.md"
+    )
+
+    待验收版本 = 确认最终候选源码配置与证据版本(S1结果, S4结果)
+    验收窗口 = 按模型规模及已确定标准选择窗口(S0结果.迁移规格, 精度规则)
+    验收结果 = 运行验收并记录步耗时显存及Loss(待验收版本, 验收窗口)
+    恢复记录 = 验证保存恢复与连续训练轨迹(待验收版本, 验收结果)
+    // 主 Skill 允许记录有依据的 checkpoint 范围外决定，需显式说明原因。
+
+    审查结果 = SKILL(
+        "code-review",
+        { 待验收版本, 验收结果, 恢复记录, 分布式证据: S3结果 }
+    )
+    迁移报告 = 填写模板(报告模板, S0结果, S1结果, S3结果, S4结果, 验收结果, 恢复记录)
+    经验复盘 = 复盘运行台账并追踪通用经验的责任资产(S0结果, S1结果, S3结果, S4结果, 验收结果)
+
+    RSI报告 = None
+    提交结果 = None
+    门禁记录 = None
+    if S4结果.实验结果.使用RSI控制器 {
+        经验审阅 = 编写或更新RSI审阅文件(经验复盘, S4结果.实验结果.全部实验凭据)
+        RSI报告 = 执行所属控制器Finalize(S4结果.实验结果, 经验审阅)
+    }
+
+    交付检查 = 检查实际交付物(交付清单, 待验收版本, 迁移报告, 恢复记录)
+    提交状态 = 记录当前授权与提交状态(任务, 待验收版本)
+
+    if 任务.已授权相应提交操作 {
+        提交结果 = SKILL("autogit", { 待验收版本, 审查结果, 交付检查, 授权范围: 任务.授权范围 })
+        if 提交结果.需要门禁处理 {
+            门禁记录 = SKILL("gate-doctor", { 提交结果, 授权范围: 任务.授权范围 })
+        }
+        提交状态 = 根据实际操作更新提交状态(提交状态, 提交结果)
+    }
+
+    缺失项 = 检查验收及交付证据完整性(
+        验收结果, 恢复记录, 审查结果, 交付检查, 经验复盘
+    )
+    if RSI报告 != None && !RSI报告.complete {
+        缺失项.append("RSI 经验复盘或回写尚未完成")
+    }
+
+    return {
+        状态: if 缺失项.为空 "PASS" else "BLOCKED",
+        待验收版本, 验收结果, 恢复记录, 迁移报告, 经验复盘, RSI报告, 提交状态,
+        提交结果, 门禁记录, 缺失项,
+        可审阅变更集: 汇总提交差异及测试证据(待验收版本)
+    }
+}
+
+S5 的相关约束和实际入口
+
+- 主 Skill 的 Acceptance、Save/restore/resume、Run ledger 等正文展开验收要求。
+- 按模型规模选择窗口，约 10B 以下为 1000 步，10B～100B 为 200 步，100B～1T 为 50 步，1T 及以上为 10 步。
+- 这些窗口对应不同强度的统计结论，报告需声明实际窗口、异常和限制。
+- .agent/rules/precision-acceptance.md 规定轨迹误差、grad_norm、首步、确定性和恢复检查，正文说明与规模窗口的关系。
+- .agent/examples/hf_text_bringup/reproduce/reproduce.sh 的 stage_s5() 复现已有模型的长运行。
+- 长运行与实际保存/恢复/续训分别保留结果，检查点路径通过实际训练配置和启动器执行。
+- python -m hyper_parallel.tools.model_integration report --output-dir ... 汇总其支持路线的结构化证据，生成 summary.md、summary.zh-CN.md。
+- .agent/skills/feature-doc/SKILL.md 可组织或更新设计文档，其模板为 templates/feature-design-doc.md。
+- .agent/skills/hf-model-integration/templates/migration-report.md 是迁移报告模板。
+- .agent/skills/hf-model-integration/templates/run-metrics.md 按每次运行填写一列，记录操作者决策、恢复闭环、门禁首次通过、设备时间和经验沉淀。
+- .agent/skills/hf-model-integration/scripts/check_asset_links.py 检查资产链接。
+- .agent/skills/autogit/SKILL.md、.agent/skills/gate-doctor/SKILL.md 分别说明提交和门禁流程。
+- 未执行的条件步骤以 None 记录，报告注明原因和适用范围。
+
+
+S6 形式验证，可选
+================
+
+阶段表直接要求
+
+- 使用 formal-verification†。
+- 持久化产物为规格和反例审查结果。
+- 退出条件为没有未解决反例。
+- 本阶段在主阶段表中标为 optional。
+
+fun S6_形式验证(任务, S5结果) {
+    验证结果 = SKILL(
+        "formal-verification",
+        {
+            仓库: 任务.仓库路径,
+            源码版本: S5结果.待验收版本,
+            验证范围: 任务.形式验证范围,
+            已有证据: S5结果
+        }
+    )
+
+    if 验证结果.引擎或模型认证不可用 {
+        return {
+            状态: "BLOCKED",
+            计划: 验证结果.计划,
+            原因: 验证结果.实际配置失败原因
+        }
+    }
+
+    产物检查 = 检查规格原始报告及各候选验证产物(验证结果)
+    if !产物检查.完整 {
+        return { 状态: "BLOCKED", 验证结果, 缺失项: 产物检查.缺失项 }
+    }
+
+    反例审查 = 审查已确认失败及待处理的所有候选(验证结果)
+    未解决反例 = 汇总未解决反例(反例审查)
+
+    return {
+        状态: if 未解决反例.为空 "PASS" else "BLOCKED",
+        规格: 验证结果.规格,
+        原始报告: 验证结果.原始报告,
+        反例审查,
+        探针结果: 验证结果.探针结果,
+        未解决反例
+    }
+}
+
+关联 Skill 内部流程
+
+1. 读取 .agent/skills/formal-verification/profiles.json，选择窄范围 profile。
+2. 读取 references/training-invariants.md 和 references/hyperparallel.md。
+   真实契约仍需核对当前实现、调用方、测试及仓库规则。
+3. 用 verify.py plan 检查离线计划。
+4. 按 references/engine-setup.md 准备官方 FM-Agent 和模型后端，运行 doctor 检查依赖与选项。
+5. 用 verify.py run --mode verify 执行，适配器加入 --isolate --all-bugs 和领域知识。
+6. 阅读原始报告及每个候选的结果、失败和待处理记录。
+7. 对已确认框架缺陷，要求针对真实实现执行的探针证据，记录触发条件及复现命令。
+   修复缺陷时将已确认探针转为相应回归测试，再按修改后的源码版本验证。
+
+实际脚本命令
+
+python .agent/skills/formal-verification/scripts/verify.py plan --profile <profile>
+python .agent/skills/formal-verification/scripts/verify.py doctor --profile <profile> --engine-root <engine-root>
+python .agent/skills/formal-verification/scripts/verify.py run --profile <profile> --engine-root <engine-root> --mode verify
+
+- --repo 指定框架仓库，--submodule 可覆盖 profile 中的源码范围。
+- --engine-python 指定引擎解释器，探针环境需按 Skill 要求可编辑安装被测框架。
+- run --mode estimate 调用官方估算，run --mode spec 用于仅生成规格。
+- plan 和 run --dry-run 用于检查计划。
+- --resume 恢复时保持范围与模式一致，代码变更后可用 --incremental <intent-file>。
+
+对应文件与产物
+
+- .agent/skills/formal-verification/SKILL.md 是本阶段关联 Skill 的入口。
+- .agent/skills/formal-verification/scripts/verify.py 是实际 CLI 适配器。
+- .agent/skills/formal-verification/profiles.json 保存 profile 配置。
+- .agent/skills/formal-verification/references/training-invariants.md 提供训练不变量问题。
+- .agent/skills/formal-verification/references/hyperparallel.md 提供 HyperParallel 领域知识。
+- .agent/skills/formal-verification/references/engine-setup.md 说明引擎和模型后端配置。
+- .agent/skills/formal-verification/references/bug-validator.md 说明候选缺陷验证要求。
+- 原始输出包括 fm_agent/report.html、logic_verification_results/、bug_validation/summary.json 及各候选探针文件。
+- 每项发现记录源码和函数、契约来源、触发条件、预期与实际行为、复现命令和输出、版本及限制。
+- 退出码零或报告中的 MATCH 需要结合实际产物和探针审查，才能判定阶段是否完成。
+- LLM 推理结果作为调查证据记录，结论需明确实际验证范围。
+- 若 formal-verification† 在 checkout 中缺失，按主 Skill 的 † 约定记录并跳过可选 S6。
+
+
+来源与表示边界
+==============
+
+1. 阶段表直接给出阶段使用项、持久化产物和退出条件。
+2. references、templates、关联 Skill 和实际脚本用于展开动作的内容。
+3. 伪代码按数据依赖安排阅读和操作，其完整顺序不等于阶段表逐字指定的顺序。
+4. 主流程和函数中的逻辑对象是说明用接口，实际使用时引用脚本生成的文件和原始报告。
+5. S0 未强制创建子 Agent，也未强制使用本说明中的函数名或额外文件名。
+6. † 表示可能由其他变更提供。当前 checkout 缺少时按主 Skill 参考资料执行等价流程，在台账记录替代。
+7. 当前主 Skill 的 Workflow 第 2 步仍写 schema-v1，实际 hyper_parallel/tools/model_integration/schemas.py 的 SCHEMA_VERSION 为 2，CLI 清单按当前解析器生成。
+8. 已有复现工具保留历史路线和协议。使用时检查当前源码、构建方式、输入身份、比较精度和设备验证范围。
+9. 本说明整理流程和源码映射，编写说明的过程中只进行了读取和文件编辑。
+
+
